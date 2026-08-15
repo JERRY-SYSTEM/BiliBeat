@@ -1,3 +1,6 @@
+# Local editor tooling state (opencode session data). Never shared.
+.opencode/
+
 # Miscellaneous
 *.class
 *.log
