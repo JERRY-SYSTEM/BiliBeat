@@ -165,12 +165,61 @@ void main() {
   // with NO season digit. The & marker rule and the season-digit rule both
   // missed it, so the bracket show name survived as the artist and
   // validation laundered it (孙燕姿's 逆光 isn't by anyone in the title).
-  test('cleanTitle: 【show】 space-separated collab 《song》', () {
-    final res = LyricsEngine.cleanTitle(
-      '【声生不息】陈楚生 周深 合作舞台《逆光》 爱在“逆光”中前行',
+  // Regression (singer misrecognition report): the 4 songs 遥遥 / 有可能的
+  // 夜晚 / 不舍 / 聊聊 are all 周深's, but cross-validation returned garbage
+  // artists (the offline fallback) because the correct singer present in the
+  // raw B站 title was never considered. Titles below are the real B站 titles.
+  test('cleanTitleWithValidation: 遥遥-周深 (reversed dash)', () async {
+    final res = await LyricsEngine.cleanTitleWithValidation(
+      '遥遥-周深',
       defaultArtist: '某UP主',
     );
-    expect(res['songTitle'], '逆光');
-    expect(res['artist'], '陈楚生 周深');
+    expect(res['songTitle'], '遥遥');
+    expect(res['artist'], '周深');
+  });
+
+  test('cleanTitleWithValidation: 不舍-周深 (reversed dash)', () async {
+    final res = await LyricsEngine.cleanTitleWithValidation(
+      '不舍-周深',
+      defaultArtist: '某UP主',
+    );
+    expect(res['songTitle'], '不舍');
+    expect(res['artist'], '周深');
+  });
+
+  test('cleanTitleWithValidation: 【纯净版】有可能的夜晚 周深 歌手2020 高清', () async {
+    final res = await LyricsEngine.cleanTitleWithValidation(
+      '【纯净版】有可能的夜晚 周深 歌手2020 高清',
+      defaultArtist: '某UP主',
+    );
+    expect(res['songTitle'], '有可能的夜晚');
+    expect(res['artist'], '周深');
+  });
+
+  test('cleanTitleWithValidation: 周深翻唱《不舍》2025生日直播', () async {
+    final res = await LyricsEngine.cleanTitleWithValidation(
+      '周深翻唱《不舍》2025生日直播',
+      defaultArtist: '某UP主',
+    );
+    expect(res['songTitle'], '不舍');
+    expect(res['artist'], '周深');
+  });
+
+  test('cleanTitleWithValidation: 周深 遥遥 (artist before song)', () async {
+    final res = await LyricsEngine.cleanTitleWithValidation(
+      '周深 遥遥',
+      defaultArtist: '某UP主',
+    );
+    expect(res['songTitle'], '遥遥');
+    expect(res['artist'], '周深');
+  });
+
+  test('cleanTitleWithValidation: 聊聊-周深 (reversed dash)', () async {
+    final res = await LyricsEngine.cleanTitleWithValidation(
+      '聊聊-周深',
+      defaultArtist: '某UP主',
+    );
+    expect(res['songTitle'], '聊聊');
+    expect(res['artist'], '周深');
   });
 }
