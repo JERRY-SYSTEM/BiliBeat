@@ -181,6 +181,39 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
     _prefetchNext();
   }
 
+  /// Re-syncs the announced track with the platform player's ACTUAL position.
+  ///
+  /// The platform can move ahead of the logical index while `_isRebuilding` is
+  /// up: the old window's next item starts gaplessly, or just_audio's Android
+  /// implementation auto-advances (`seekToNextMediaItem`) when a child is
+  /// appended while the player is in STATE_ENDED with playWhenReady still true.
+  /// Those index events are deliberately dropped by the guards in
+  /// [currentIndexStream]'s listener, and nothing then re-announces the track
+  /// that is really playing — the card keeps showing `_playlist[_currentIndex]`
+  /// (the old song) while the audio moves on.
+  ///
+  /// Runs after every rebuild settles (and after re-anchoring the window), and
+  /// only ever announces when the mapping is provably correct: the queue's
+  /// current child's tag must be the very track `_playlist[logical]` says it
+  /// is. During a failed start the base index can still describe the previous
+  /// window, so without this tag check a bogus announce could land on some
+  /// unrelated track of the new playlist.
+  void _reconcileActiveTrack() {
+    final playerIndex = _player.currentIndex;
+    if (playerIndex == null || playerIndex < 0) return;
+    if (playerIndex >= _queueSource.length) return;
+    final logical = _queueBaseIndex + playerIndex;
+    if (logical < 0 || logical >= _playlist.length) return;
+    if (logical == _currentIndex) return;
+    final queuedChild = _queueSource.children[playerIndex];
+    if (queuedChild is! ja.IndexedAudioSource) return;
+    final queuedTag = queuedChild.tag;
+    if (queuedTag is! Track) return;
+    if (queuedTag.id != _playlist[logical].id) return;
+    _currentIndex = logical;
+    _onActiveTrackChanged(_playlist[logical]);
+  }
+
   /// Announce the newly active track to every observer: the UI stream, the
   /// system media session, the recently-played history and the duration.
   void _announce(Track track) {
@@ -390,6 +423,7 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
     final playerIndex = _player.currentIndex ?? 0;
     _queueBaseIndex = _currentIndex - playerIndex;
     await _trimQueueAfterCurrent();
+    _reconcileActiveTrack();
     unawaited(_prefetchNext());
   }
 
@@ -441,7 +475,10 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
       debugPrint('playTrack download failed: $e');
       if (token == _startToken) {
         _isRebuilding = false;
-        _broadcastState();
+        // The start never landed: announce whatever the platform is really
+        // playing (the old window may have advanced while we downloaded), so
+        // the card does not stay stuck on a track that never started.
+        _reconcileActiveTrack();
       }
       return;
     }
@@ -473,7 +510,12 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
       debugPrint('startCurrent error: $e');
     } finally {
       // Again: only the newest start may lower the flag.
-      if (token == _startToken) _isRebuilding = false;
+      if (token == _startToken) {
+        _isRebuilding = false;
+        // Re-sync the announced track with the platform's real position (see
+        // [_reconcileActiveTrack]).
+        _reconcileActiveTrack();
+      }
     }
 
     if (token != _startToken) return;

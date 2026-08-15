@@ -201,6 +201,30 @@
 
 ### 已修复 Bug (Fixed Bugs)
 
+#### 🐛 Bug #53: 歌手识别（交叉检验）拿不到标题里明明存在的歌手
+- **现象**：遥遥 / 有可能的夜晚 / 不舍 / 聊聊 四首都是周深的歌，识别结果却是 `2025生日直播`、`纯净版`、UP 主名等垃圾歌手。
+- **根因（交叉检验的信任链断裂）**：
+  1. 旧逻辑 `bestArtist = artistInRaw ? officialArtist : fallback`——官方曲目歌手不在标题里时直接投降，把离线规则的垃圾结果奉为答案，标题 token 里的正确歌手从不被考虑（例如 周深翻唱《不舍》时网易云最热的「不舍」是岁枝的翻唱，岁枝不在标题里，周深在，却选岁枝）。
+  2. 离线兜底自身被毒化：`_noisyClean` 整词丢弃含「翻唱」的 token（周深翻唱→周深也没了）；`【纯净版】【杜比音效】`不在噪音表里；`不舍-周深` 这类「歌名-歌手」方向被当成「歌手-歌名」解析（歌名歌手互换）。
+- **修复**（`lib/services/lyrics_engine.dart`）：
+  - `_resolveArtistFromTitle`：官方歌手不在标题时，按 标题内 hint → 标题内人名 token 逐个「歌手 歌名」查库 → CJK 人名存在性检查 三级解析，命中加分；**hint 不裸信**（反向破折号标题里 hint 可能是歌名，如「周深-世界赠予我的」），必须查库确认。
+  - `_generateCandidates`：破折号两侧都是人名的标题生成反向候选（`遥遥-周深` → song=遥遥 hint=周深）。
+  - `_noisyClean` 重写：胶水噪音（翻唱/原唱/混音/修音/纯享/版本/舞台/直播等）从 token 内剥离而非整词丢弃；保留独立分隔符 token；`_generateCandidates` 不在内部二次清洗候选。
+  - 搜索农场标题降权：标题同时含「歌名+歌手」整词回声的曲目（网易云上真有名为「遥遥 周深」的假曲目）排名垫底；官方曲名等于整条标题时不给虚高加分，歌名回退用候选名。
+- **回归测试**：`test/zhoushen_test.dart` 新增 6 条（4 首用户曲目 + 2 个反向破折号变体），全套 87 条通过，`flutter analyze` 无告警。
+
+#### 🐛 Bug #54: 实际已经在放下一首歌，播放卡却还显示原来那首
+- **现象**：音频已经进到下一首（gapless 无缝或自动连播），底部播放卡仍停留在一首之前的曲目上。
+- **根因（重建期间的原生下标事件被丢弃，之后无人拉回）**：播放卡的唯一数据源是 `_announce()`，只有两个触发点——手动 `playTrack`/`_playAtIndex` 与 `currentIndexStream` 回调；后者有两道守卫：`_isRebuilding` 期间直接返回、`logical == _currentIndex` 相等直接返回。原生播放器却可以在重建期间自行前进，且其下标事件恰好在守卫窗口内到达，事件被吞掉后 `_currentIndex` 就永久落后，卡片与音频从此错位：
+  1. **旧队列 gapless 前进**：`_startCurrent` 从下载前到 `setAudioSource` 后一直置 `_isRebuilding`（下载可能要好几秒），旧窗口的下一首可能在此期间无缝开播。
+  2. **just_audio 0.10.6 Android 的时序自动前进**：`AudioPlayer.java` 的 `onTimelineChanged` 在 `STATE_ENDED` 且 `playWhenReady=true` 时，对任何队列变化（例如 `_prefetchNext` 的 append）都会自动 `seekToNextMediaItem()`；而 `autoAdvanceHeld` 分支只把 Dart 侧 `_isPlaying` 置 false，从不真正 `_player.pause()`。
+  3. **重建成功反而自愈、失败才暴露**：若重建成功，`clear()` 会把旧队列连同刚前进到的曲目一起清掉，错位只是瞬态；若下载失败，旧队列原封不动，前进后的曲目继续播放，而卡片停在播放器从没放过的「目标曲目」上，错位持续到下一次前进才被冲掉。
+- **修复**（`lib/services/audio_player_handler.dart`）：
+  - 新增 `_reconcileActiveTrack()`：在每次重建收尾（`_startCurrent` 的 `finally` 与下载失败路径）和 `setShuffle` 重新锚定窗口后，用 `_player.currentIndex`（just_audio 内部状态，不随应用侧事件丢弃而失真）反推逻辑下标，若与 `_currentIndex` 不一致则补一次 `_announce`，让卡片对齐原生播放器**实际**在播的曲目。
+  - 对齐前用队列项 tag 做**映射合法性校验**：`_queueSource.children[playerIndex]` 必须是 `IndexedAudioSource` 且其 `tag` 就是 `_playlist[logical]` 这首歌。下载失败路径里 `_queueBaseIndex` 仍描述旧窗口，没有这道校验就会把新列表里任意一首不相干的歌播报成「正在播放」。
+  - `autoAdvanceHeld` 不暂停播放器属刻意设计：编辑器关闭后恢复自动连播正是靠平台在 append 时的自动前进，暂停反而会破坏该流程，故不改。
+- **验证**：`flutter analyze` 无告警，全套 87 条测试通过。竞态型缺陷无法用现有测试基建（handler 无 mock 环境）覆盖，需真机复测「编辑页停留后关闭 → 连播衔接」与「下载失败后卡片回落到实际在播曲目」两条路径。
+
 #### 🐛 Bug #44: 改完元数据，下方播放卡不刷新
 - **根因**：`Track` 的 `==` 只比较 `id`（刻意如此，列表查找依赖它）。`ValueNotifier` 赋值前先判 `_value == newValue` 相等就直接 return，于是「同一首歌、改了标题/封面」的新对象被当成相同值**静默丢弃**，迷你播放器收不到通知；播放页因为走的是 Stream 所以正常刷新——才显出只有下方卡片是旧的。
 - **修复**：`_currentTrack` 改用 `TrackNotifier`（`models/track.dart`），按**对象标识**而非 `==` 判断，任何新对象都通知。回归测试已覆盖。
