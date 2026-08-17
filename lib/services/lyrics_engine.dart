@@ -465,6 +465,11 @@ class LyricsEngine {
         var hitArtist = artistInRaw ? officialArtist : null;
         var artistScore = 0;
         if (hitArtist == null) {
+          // Resolution costs up to four more HTTP requests per candidate
+          // (over a client capped at 4 connections/host), and it only ever
+          // adds 1–2 to the score — a candidate that cannot beat the current
+          // best even with the maximum bonus can never win, so skip it.
+          if ((score + 2) * 10 + bookIdx <= bestEffective) continue;
           final resolved = await _resolveArtistFromTitle(
             song: song,
             hint: artistQuery,
