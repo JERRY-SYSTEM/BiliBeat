@@ -201,6 +201,32 @@
 
 ### 已修复 Bug (Fixed Bugs)
 
+#### 🐛 Bug #55: 空格分隔的合作歌手提示词让带提示的查询一个都匹配不上（逆光又变回孙燕姿）
+- **现象**：【声生不息】陈楚生 周深《逆光》的智能识别把歌手判回孙燕姿——3.11.1 修好的路径在 3.11.2 又退回去了。
+- **根因（四处识别回归）**：
+  1. `matchesSongQuery` 只尝试查询第一个空格后的尾巴：对 `陈楚生 周深 逆光`，尾巴是 `周深 逆光`，2 字歌名过不了 `isTitleMatching` 的长度门槛，带提示的查询一个都不匹配，回落到裸 `逆光` 搜索命中孙燕姿录音室版；
+  2. 结果歌手列表为空时 `queryNorm.contains('')` 恒真，第一条无法解析歌手的结果直接 `break`，新排序形同虚设；
+  3. `_noisyClean` 的分隔符检查跑在按 `/|｜` 切分之后，独立分隔符 token 被切碎丢弃，`周深 / 大鱼` 不再拆成歌手+歌名（doc 注释宣称的保留行为与实现相反）；
+  4. `glueNoise` 里的 `Cover|MV|Live` 无锚点且大小写不敏感，`replaceAll` 从真实单词里抠词：`Alive`→`A`、`Discovery`→`Dis`、`Deliver`→`De`，`周深 - Alive` 只剩 `周深 -`。
+- **修复**（`lib/services/lyrics_engine.dart`）：
+  - `matchesSongQuery` 改为对查询的每个空格后缀尝试匹配，多歌手 token 的提示词不再挡路；
+  - 歌手列表判空后再做包含比较；
+  - 整 token 先过 `pureSeparatorToken` 再切分，独立分隔符原样保留；
+  - `Cover|MV|Live` 加词边界锚点（`noiseKeywords`/`tokenNoise` 同步），只在独立成词时当噪音。
+- **回归测试**：新增 `matchesSongQuery` 多 token 提示、`周深 - Alive`、`周深 / 大鱼` 3 条离线用例；恢复被误删的 `【声生不息】陈楚生 周深《逆光》` 用例；全部依赖网易云的用例加离线跳过保护（离线/CI 下 skip 而非失败）。线上实测 `【声生不息】陈楚生 周深 合作舞台《逆光》` 识别回 `逆光 / 陈楚生, 周深`，全套 91 条通过，`flutter analyze` 无告警。
+
+#### 🐛 Bug #56: 智能识别一次点击最多串行几百个 HTTP 请求
+- **现象**：复杂标题点一次智能识别要等很久；客户端每主机只允许 4 条连接，请求全部串行排队。
+- **根因**：每个候选都先 await `_resolveArtistFromTitle`（最多 4 个额外请求）再与当前最优比较，而解析只会给分数 +1/+2——明明赢不了的候选也白白花掉网络时间。
+- **修复**（`lib/services/lyrics_engine.dart`）：候选只有在「加满解析分仍能超过当前最优」时才解析（`(score+2)*10+bookIdx > bestEffective`），否则直接跳过。解析加分上界就是 2，结果与逐候选全解析完全一致。
+- **验证**：全套测试通过，`flutter analyze` 无告警。
+
+#### 🐛 Bug #57: 冷启动下载失败后媒体会话卡在「加载中」
+- **现象**：冷启动（原生队列为空）点播放，下载失败后通知栏/媒体会话一直显示 loading。
+- **根因**：`_startCurrent` 开头推送 `AudioProcessingState.loading`；下载失败路径只调 `_reconcileActiveTrack()`——冷启动时 `_player.currentIndex == null`，它直接返回，无人再广播状态，会话永远钉在 loading。
+- **修复**（`lib/services/audio_player_handler.dart`）：失败路径在 `_reconcileActiveTrack()` 后补一次 `_broadcastState()`，把会话拉回播放器的真实状态。
+- **验证**：`flutter analyze` 无告警；handler 无 mock 基建，需真机复测「无网络冷启动点播放」路径。
+
 #### 🐛 Bug #53: 歌手识别（交叉检验）拿不到标题里明明存在的歌手
 - **现象**：遥遥 / 有可能的夜晚 / 不舍 / 聊聊 四首都是周深的歌，识别结果却是 `2025生日直播`、`纯净版`、UP 主名等垃圾歌手。
 - **根因（交叉检验的信任链断裂）**：

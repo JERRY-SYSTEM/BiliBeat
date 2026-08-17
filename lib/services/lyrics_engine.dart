@@ -37,7 +37,7 @@ class LyricsEngine {
   // Common noise words in B站 titles
   static final RegExp noiseKeywords = RegExp(
     r'(?:4K|1080P|720P|60帧|50帧|杜比视界|杜比全景声|杜比音效|Hi-?Res|无损音质|无损|高音质|高音質|HQ|SQ|'
-    r'官方MV|MV|纯享版|纯享|纯净版|动态歌词|LRC|歌词排版|流行歌曲|全场|完整版|片段|精剪|多机位|直拍|现场|Live|'
+    r'官方MV|\bMV\b|纯享版|纯享|纯净版|动态歌词|LRC|歌词排版|流行歌曲|全场|完整版|片段|精剪|多机位|直拍|现场|\bLive\b|'
     r'首唱|单曲循环|单曲|纯音频|Audio|字幕组|字幕|重置|超清|高清|录音棚|在.*大声听|'
     r'主题曲|片尾曲|片头曲|插曲|推广曲|印象曲|角色曲|宣传曲|ED|OP|OST|'
     r'舞台|带来|第\s*\d+\s*[季期届集]|EP\d+)',
@@ -48,10 +48,12 @@ class LyricsEngine {
   // "陈奕迅新歌", "毛不易演唱会"). Dropping such a token whole loses the
   // name; stripping these out of the token keeps it. Deliberately disjoint
   // from [noiseKeywords]'s format class: format words (无损, 音质, 4K…) leave
-  // meaningless residue and must still kill the whole token.
+  // meaningless residue and must still kill the whole token. The ASCII glue
+  // words are word-anchored so they cannot eat real words out of a token
+  // (Alive, Discovery, Deliver must survive).
   static final RegExp glueNoise = RegExp(
     r'(?:翻唱|原唱|演唱|新歌|混音|修音|字幕|伴奏|现场|演唱会|纯享|单曲|直拍|修复|'
-    r'完整版|官方版|版本|首唱|歌词排版|歌词|舞台|合作|UP主|Cover|MV|Live)',
+    r'完整版|官方版|版本|首唱|歌词排版|歌词|舞台|合作|UP主|\bCover\b|\bMV\b|\bLive\b)',
     caseSensitive: false,
   );
 
@@ -71,7 +73,7 @@ class LyricsEngine {
   // Token-level noise: if a space-separated token contains any of these, the
   // whole token is noise (spaces are the atomic unit of titles).
   static final RegExp tokenNoise = RegExp(
-    noiseKeywords.pattern + r'|(?:Cover|翻唱|原唱|词/曲|混音|演唱|UP主|版本)',
+    noiseKeywords.pattern + r'|(?:\bCover\b|翻唱|原唱|词/曲|混音|演唱|UP主|版本)',
     caseSensitive: false,
   );
 
@@ -119,6 +121,13 @@ class LyricsEngine {
     final out = <String>[];
     for (final t in s.replaceAll(bracketStripper, ' ').split(RegExp(r'\s+'))) {
       if (t.isEmpty) continue;
+      // A whole-token separator ("/", "|", "｜") must survive for step-4's
+      // "Artist - Song" split — the bar-split below would otherwise destroy
+      // it (and the pureSeparatorToken check would only see its empty husks).
+      if (pureSeparatorToken.hasMatch(t)) {
+        out.add(t);
+        continue;
+      }
       for (final seg in t.split(RegExp(r'[|｜、,，/]'))) {
         if (pureSeparatorToken.hasMatch(seg)) {
           out.add(seg);
@@ -592,14 +601,16 @@ class LyricsEngine {
   /// match 《岁月》), and a compound "artist song" title also matches on its
   /// post-space part — otherwise short song names (2–3 chars, e.g. 岁月)
   /// could never pass [isTitleMatching]'s length guard against a query like
-  /// "黄绮珊&周深 岁月".
+  /// "黄绮珊&周深 岁月". A query may carry several artist tokens before the
+  /// song ("陈楚生 周深 逆光"), so every space-suffix is tried, not just the
+  /// first tail.
   static bool matchesSongQuery(String songName, String title) {
     final cleanName = songName.replaceAll(parenSubtitle, '').trim();
     if (isTitleMatching(cleanName, title)) return true;
-    final sp = title.indexOf(RegExp(r'\s'));
-    if (sp > 0 && sp < title.length - 1) {
-      final tail = title.substring(sp + 1).trim();
-      if (tail.isNotEmpty && isTitleMatching(cleanName, tail)) return true;
+    final tokens =
+        title.split(RegExp(r'\s+')).where((t) => t.isNotEmpty).toList();
+    for (var i = 1; i < tokens.length; i++) {
+      if (isTitleMatching(cleanName, tokens.sublist(i).join(' '))) return true;
     }
     return false;
   }
@@ -801,6 +812,7 @@ class LyricsEngine {
                     .map((a) => a['name'] as String)
                     .join(', ');
                 if (queryNorm.isNotEmpty &&
+                    artists.isNotEmpty &&
                     queryNorm.contains(_normalize(artists))) {
                   queryArtistMatch = (song, lines);
                   break;

@@ -1,5 +1,32 @@
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:bilibeat/services/lyrics_engine.dart';
+
+bool? _networkChecked;
+bool _networkAvailable = false;
+
+/// Probes connectivity to the lyric provider once per run; every live-NetEase
+/// test starts with this so the suite stays green offline and in CI, and no
+/// test result depends on NetEase's current ranking changing.
+Future<void> _skipIfOffline() async {
+  if (_networkChecked != null) {
+    if (!_networkAvailable) markTestSkipped('requires music.163.com');
+    return;
+  }
+  _networkChecked = true;
+  try {
+    final socket = await Socket.connect(
+      'music.163.com',
+      443,
+      timeout: const Duration(seconds: 4),
+    );
+    socket.destroy();
+    _networkAvailable = true;
+  } catch (_) {
+    markTestSkipped('requires music.163.com');
+  }
+}
 
 void main() {
   test('cleanTitle: 周深-世界赠予我的 (with noise)', () {
@@ -54,6 +81,7 @@ void main() {
   });
 
   test('cleanTitleWithValidation: 周深-世界赠予我的', () async {
+    await _skipIfOffline();
     final res = await LyricsEngine.cleanTitleWithValidation(
       '周深-世界赠予我的 4k最高音质无损纯享 重混音修音版本【Hi-Res无损】',
       defaultArtist: '琉云星',
@@ -64,6 +92,7 @@ void main() {
   });
 
   test('cleanTitleWithValidation: 【姚贝娜&amp;单依纯 心火】collab bracket (DB disambiguation)', () async {
+    await _skipIfOffline();
     final res = await LyricsEngine.cleanTitleWithValidation(
       '【姚贝娜&amp;单依纯 心火】音乐是我们最珍贵的琥珀，致敬。',
       defaultArtist: '某UP主',
@@ -101,6 +130,7 @@ void main() {
   });
 
   test('cleanTitleWithValidation: show-vs-song book brackets', () async {
+    await _skipIfOffline();
     final res = await LyricsEngine.cleanTitleWithValidation(
       '【周深｜舞台】《音乐缘计划》第二季EP09带来《全世界下雨》舞台',
       defaultArtist: '某UP主',
@@ -110,6 +140,7 @@ void main() {
   });
 
   test('cleanTitleWithValidation: repeated taps are idempotent (memoized)', () async {
+    await _skipIfOffline();
     const raw = '【周深｜舞台】《音乐缘计划》第二季EP09带来《全世界下雨》舞台';
     final a =
         await LyricsEngine.cleanTitleWithValidation(raw, defaultArtist: '某UP主');
@@ -129,6 +160,7 @@ void main() {
   });
 
   test('cleanTitleWithValidation: show metadata after | separator', () async {
+    await _skipIfOffline();
     final res = await LyricsEngine.cleanTitleWithValidation(
       '【纯享】刘端端姚晓棠《霸王别姬》 舞台携手再现传世经典 | 音乐缘计划 | Melody Journey | iQIYI奇艺音悦台',
       defaultArtist: '某UP主',
@@ -165,11 +197,64 @@ void main() {
   // with NO season digit. The & marker rule and the season-digit rule both
   // missed it, so the bracket show name survived as the artist and
   // validation laundered it (孙燕姿's 逆光 isn't by anyone in the title).
+  test('cleanTitle: 【show】 space-separated collab 《song》', () {
+    final res = LyricsEngine.cleanTitle(
+      '【声生不息】陈楚生 周深 合作舞台《逆光》 爱在“逆光”中前行',
+      defaultArtist: '某UP主',
+    );
+    expect(res['songTitle'], '逆光');
+    expect(res['artist'], '陈楚生 周深');
+  });
+
+  // Regression (3.11.3, rule above in live form): the hinted "陈楚生 周深
+  // 逆光" search carries two artist tokens; the match against the provider's
+  // song name must survive them (isTitleMatching's length guard alone rejects
+  // the 2-char 逆光 against the full query). Without this, the hinted query
+  // yielded nothing and the bare 逆光 fallback resurrected 孙燕姿's studio
+  // version — the 3.11.1 fix regressed.
+  test('matchesSongQuery: multi-token artist hints still match short song names', () {
+    expect(
+      LyricsEngine.matchesSongQuery('逆光 (live)', '陈楚生 周深 逆光'),
+      isTrue,
+    );
+    expect(
+      LyricsEngine.matchesSongQuery('逆光', '陈楚生 周深 逆光'),
+      isTrue,
+    );
+    expect(
+      LyricsEngine.matchesSongQuery('岁月 (live)', '黄绮珊&周深 岁月'),
+      isTrue,
+    );
+    expect(
+      LyricsEngine.matchesSongQuery('世界赠予我的', '周深 世界赠予我的'),
+      isTrue,
+    );
+  });
+
+  // Regression (3.11.3): whole-word English glue noise (Cover/MV/Live) must
+  // not eat real words — 周深 - Alive must split into artist 周深 / song
+  // Alive, and Discover/Deliver-like tokens must survive _noisyClean.
+  test('cleanTitle: English glue noise does not eat real words', () {
+    final res = LyricsEngine.cleanTitle('周深 - Alive', defaultArtist: '某UP主');
+    expect(res['songTitle'], 'Alive');
+    expect(res['artist'], '周深');
+  });
+
+  // Regression (3.11.3): a standalone bar token must survive _noisyClean so
+  // step 4's "Artist - Song" split still fires (the bar-split previously ran
+  // before the pureSeparatorToken check and destroyed it).
+  test('cleanTitle: standalone / separator still splits Artist / Song', () {
+    final res = LyricsEngine.cleanTitle('周深 / 大鱼', defaultArtist: '某UP主');
+    expect(res['songTitle'], '大鱼');
+    expect(res['artist'], '周深');
+  });
+
   // Regression (singer misrecognition report): the 4 songs 遥遥 / 有可能的
   // 夜晚 / 不舍 / 聊聊 are all 周深's, but cross-validation returned garbage
   // artists (the offline fallback) because the correct singer present in the
   // raw B站 title was never considered. Titles below are the real B站 titles.
   test('cleanTitleWithValidation: 遥遥-周深 (reversed dash)', () async {
+    await _skipIfOffline();
     final res = await LyricsEngine.cleanTitleWithValidation(
       '遥遥-周深',
       defaultArtist: '某UP主',
@@ -179,6 +264,7 @@ void main() {
   });
 
   test('cleanTitleWithValidation: 不舍-周深 (reversed dash)', () async {
+    await _skipIfOffline();
     final res = await LyricsEngine.cleanTitleWithValidation(
       '不舍-周深',
       defaultArtist: '某UP主',
@@ -188,6 +274,7 @@ void main() {
   });
 
   test('cleanTitleWithValidation: 【纯净版】有可能的夜晚 周深 歌手2020 高清', () async {
+    await _skipIfOffline();
     final res = await LyricsEngine.cleanTitleWithValidation(
       '【纯净版】有可能的夜晚 周深 歌手2020 高清',
       defaultArtist: '某UP主',
@@ -197,6 +284,7 @@ void main() {
   });
 
   test('cleanTitleWithValidation: 周深翻唱《不舍》2025生日直播', () async {
+    await _skipIfOffline();
     final res = await LyricsEngine.cleanTitleWithValidation(
       '周深翻唱《不舍》2025生日直播',
       defaultArtist: '某UP主',
@@ -206,6 +294,7 @@ void main() {
   });
 
   test('cleanTitleWithValidation: 周深 遥遥 (artist before song)', () async {
+    await _skipIfOffline();
     final res = await LyricsEngine.cleanTitleWithValidation(
       '周深 遥遥',
       defaultArtist: '某UP主',
@@ -215,6 +304,7 @@ void main() {
   });
 
   test('cleanTitleWithValidation: 聊聊-周深 (reversed dash)', () async {
+    await _skipIfOffline();
     final res = await LyricsEngine.cleanTitleWithValidation(
       '聊聊-周深',
       defaultArtist: '某UP主',
