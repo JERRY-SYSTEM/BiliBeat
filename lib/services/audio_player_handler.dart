@@ -479,6 +479,11 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
         // playing (the old window may have advanced while we downloaded), so
         // the card does not stay stuck on a track that never started.
         _reconcileActiveTrack();
+        // On a cold start there is no source at all (currentIndex == null),
+        // so the reconcile above announces nothing — re-broadcast the real
+        // state to unpin the media session from the loading state pushed at
+        // the top of this method.
+        _broadcastState();
       }
       return;
     }
