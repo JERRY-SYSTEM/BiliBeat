@@ -10,6 +10,46 @@ import '../models/playlist.dart';
 import '../models/lyric_line.dart';
 import 'audio_download_service.dart';
 
+/// Parse helpers run inside a background isolate (via [compute]): a large
+/// library means several files of jsonDecode + object construction, and doing
+/// that on the UI isolate blocked the first frame after startup. They are
+/// top-level because isolate entry points must be top-level or static, and
+/// they only touch pure model constructors — never the service's static state.
+List<Track> _parseTrackList(String json) {
+  final list =
+      DatabaseService._readPayload(jsonDecode(json)) as List<dynamic>? ?? [];
+  return list
+      .map((item) => Track.fromMap(Map<String, dynamic>.from(item)))
+      .toList();
+}
+
+List<Playlist> _parsePlaylistList(String json) {
+  final list =
+      DatabaseService._readPayload(jsonDecode(json)) as List<dynamic>? ?? [];
+  return list.map((item) {
+    final map = Map<String, dynamic>.from(item);
+    final tracks = (map['tracks'] as List<dynamic>? ?? [])
+        .map((t) => Track.fromMap(Map<String, dynamic>.from(t)))
+        .toList();
+    return Playlist.fromMap(map, tracks: tracks);
+  }).toList();
+}
+
+Map<String, LyricsResult> _parseLyricsMap(String json) {
+  final map = DatabaseService._readPayload(jsonDecode(json))
+      as Map<String, dynamic>? ?? {};
+  final result = <String, LyricsResult>{};
+  map.forEach((key, value) {
+    try {
+      result[key] =
+          LyricsResult.fromMap(Map<String, dynamic>.from(value as Map));
+    } catch (e) {
+      debugPrint('Lyrics cache entry $key skipped: $e');
+    }
+  });
+  return result;
+}
+
 class DatabaseService {
   static final List<Track> _recentlyPlayed = [];
   static final List<Track> _downloadedTracks = [];
@@ -71,9 +111,9 @@ class DatabaseService {
     try {
       final file = File(path);
       if (!await file.exists()) return;
-      final list = _readPayload(jsonDecode(await file.readAsString()))
-          as List<dynamic>? ?? [];
-      final tracks = list.map((item) => Track.fromMap(Map<String, dynamic>.from(item))).toList();
+      // Parse (jsonDecode + Track construction) in a background isolate so a
+      // large library does not stall the first frame after startup.
+      final tracks = await compute(_parseTrackList, await file.readAsString());
       store
         ..clear()
         ..addAll(tracks);
@@ -118,15 +158,8 @@ class DatabaseService {
     try {
       final file = File(path);
       if (!await file.exists()) return;
-      final list = _readPayload(jsonDecode(await file.readAsString()))
-          as List<dynamic>? ?? [];
-      final playlists = list.map((item) {
-        final map = Map<String, dynamic>.from(item);
-        final tracks = (map['tracks'] as List<dynamic>? ?? [])
-            .map((t) => Track.fromMap(Map<String, dynamic>.from(t)))
-            .toList();
-        return Playlist.fromMap(map, tracks: tracks);
-      }).toList();
+      final playlists =
+          await compute(_parsePlaylistList, await file.readAsString());
       if (!playlists.any((p) => p.id == Playlist.favoritesId)) {
         playlists.insert(0, Playlist(id: Playlist.favoritesId, name: '收藏', tracks: []));
       }
@@ -156,16 +189,10 @@ class DatabaseService {
     try {
       final file = File(path);
       if (!await file.exists()) return;
-      final map = _readPayload(jsonDecode(await file.readAsString()))
-          as Map<String, dynamic>? ?? {};
-      map.forEach((key, value) {
-        try {
-          _lyricsCache[key] =
-              LyricsResult.fromMap(Map<String, dynamic>.from(value as Map));
-        } catch (e) {
-          debugPrint('Lyrics cache entry $key skipped: $e');
-        }
-      });
+      final parsed = await compute(_parseLyricsMap, await file.readAsString());
+      _lyricsCache
+        ..clear()
+        ..addAll(parsed);
     } catch (e) {
       debugPrint('DatabaseService load $path skipped: $e');
     }
