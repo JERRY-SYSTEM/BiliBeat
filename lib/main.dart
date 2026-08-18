@@ -1,5 +1,7 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:math';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'models/track.dart';
@@ -98,6 +100,16 @@ void main() async {
       androidNotificationOngoing: true,
     ),
   );
+  // Android 13+ requires a runtime POST_NOTIFICATIONS grant for notifications
+  // on stricter OEM builds. Fire-and-forget: stock Android exempts the media
+  // session notification, so the answer is "no" on most devices and that is
+  // fine either way.
+  if (!kIsWeb && Platform.isAndroid) {
+    const channel = MethodChannel('bilibeat/permissions');
+    try {
+      await channel.invokeMethod('requestNotifications');
+    } catch (_) {}
+  }
   runApp(const BiliBeatApp());
 }
 

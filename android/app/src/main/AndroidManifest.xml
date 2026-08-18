@@ -4,14 +4,20 @@
     <uses-permission android:name="android.permission.WAKE_LOCK"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"/>
+    <!-- Android 13+ gates notifications behind a runtime grant. Stock Android
+         exempts media-session notifications, but stricter OEM builds do not. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
 
     <application
         android:label="BiliBeat"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
-        android:usesCleartextTraffic="false">
+        android:usesCleartextTraffic="false"
+        android:allowBackup="false"
+        android:fullBackupContent="false"
+        android:dataExtractionRules="@xml/data_extraction_rules">
         <activity
-            android:name="com.ryanheise.audioservice.AudioServiceActivity"
+            android:name="com.bilibeat.bilibeat.MainActivity"
             android:exported="true"
             android:launchMode="singleTop"
             android:taskAffinity=""

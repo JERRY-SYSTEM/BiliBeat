@@ -1,9 +1,15 @@
 # Keep the Flutter engine + plugin registrant.
+#
+# Scoped per package instead of a blanket io.flutter.** keep: the engine's
+# embedding and engine packages are reached reflectively from libflutter.so
+# via JNI name resolution, so they must survive R8 unchanged. A blanket wild
+# card kept every Flutter class, making the narrower rules below dead weight.
+-keep class io.flutter.embedding.** { *; }
+-keep class io.flutter.engine.** { *; }
 -keep class io.flutter.app.** { *; }
 -keep class io.flutter.plugin.** { *; }
 -keep class io.flutter.util.** { *; }
 -keep class io.flutter.view.** { *; }
--keep class io.flutter.** { *; }
 -keep class io.flutter.plugins.** { *; }
 
 # just_audio -> androidx.media3 (ExoPlayer). media3 ships consumer rules, but
