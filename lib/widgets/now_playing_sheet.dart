@@ -81,7 +81,12 @@ class _NowPlayingSheetState extends State<NowPlayingSheet> {
     _subs.add(h.currentTrackStream.listen((t) {
       if (t == null || !mounted) return;
       if (_followHandler && t.id != _displayTrack.id) {
-        setState(() => _displayTrack = t);
+        setState(() {
+          _displayTrack = t;
+          // The download task follows the displayed track, or the primary
+          // control stays stuck on the previous song's ring.
+          _downloadTask = _liveTaskFor(t.id);
+        });
         _refreshTrackState();
       } else if (t.id == _displayTrack.id) {
         setState(() => _displayTrack = t); // metadata edit
@@ -101,10 +106,14 @@ class _NowPlayingSheetState extends State<NowPlayingSheet> {
     _subs.add(h.loopModeStream.listen((m) {
       if (mounted) setState(() => _loopMode = m);
     }));
-    _subs.add(DownloadManager.instance.updates.listen((_) {
-      if (!mounted) return;
+    _subs.add(DownloadManager.instance.updates.listen((changedId) {
+      // Only this sheet's track matters: progress ticks for any other
+      // download arrive every 64 KiB and would rebuild the whole page for
+      // nothing. Unchanged tasks (same object) are equally skippable.
+      if (!mounted || changedId != _displayTrack.id) return;
       final task = _liveTaskFor(_displayTrack.id);
       final finished = _downloadTask != null && task == null;
+      if (identical(task, _downloadTask)) return;
       setState(() => _downloadTask = task);
       // Only stat the filesystem when a download actually finished, not on
       // every progress tick (they arrive every 64 KiB).
@@ -271,6 +280,7 @@ class _NowPlayingSheetState extends State<NowPlayingSheet> {
                               }
                               await DatabaseService.cacheLyrics(
                                   _displayTrack.id, result);
+                              if (!mounted) return;
                               setState(() => _showLyrics = true);
                               _closeEditor();
                             },
@@ -283,6 +293,7 @@ class _NowPlayingSheetState extends State<NowPlayingSheet> {
                               );
                               setState(() => _displayTrack = updated);
                               await DatabaseService.updateTrackMetadata(updated);
+                              if (!mounted) return;
                               widget.handler.updateCurrentTrackMetadata(updated);
                               _closeEditor();
                             },
