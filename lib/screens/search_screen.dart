@@ -66,6 +66,18 @@ class _SearchScreenState extends State<SearchScreen> {
   final Set<String> _seenRecIds = {};
   bool _recReachedEnd = false;
 
+  /// Monotonic pass counter so a slow recommendation fetch can never append a
+  /// stale batch after a fresh pass reset the page and the seen-set.
+  int _recPass = 0;
+
+  /// A load-more fetch that failed gets a quiet retry window instead of
+  /// re-firing on every scroll pixel, and the footer shows why the list
+  /// stopped growing.
+  bool _searchLoadFailed = false;
+  bool _recLoadFailed = false;
+  DateTime _lastSearchFail = DateTime.fromMillisecondsSinceEpoch(0);
+  DateTime _lastRecFail = DateTime.fromMillisecondsSinceEpoch(0);
+
   @override
   void initState() {
     super.initState();
@@ -127,13 +139,15 @@ class _SearchScreenState extends State<SearchScreen> {
       return;
     }
     if (mounted) setState(() => _isLoadingRecommended = true);
-    // A fresh recommendation pass restarts pagination from page 1.
+    // A fresh recommendation pass restarts pagination from page 1. Its token
+    // invalidates any load-more that was in flight when the pass began.
     _recPage = 1;
     _seenRecIds.clear();
     _recReachedEnd = false;
+    final pass = ++_recPass;
     try {
       final tracks = await RecommendationEngine.recommend();
-      if (!mounted) return;
+      if (!mounted || pass != _recPass) return;
       for (final t in tracks) {
         _seenRecIds.add(t.id);
       }
@@ -141,10 +155,11 @@ class _SearchScreenState extends State<SearchScreen> {
         _recommendedTracks = tracks;
         _isLoadingRecommended = false;
         _recommendationsStale = false;
+        _recLoadFailed = false;
         if (tracks.isEmpty) _recReachedEnd = true;
       });
     } catch (_) {
-      if (mounted) {
+      if (mounted && pass == _recPass) {
         setState(() => _isLoadingRecommended = false);
       }
     }
@@ -194,6 +209,7 @@ class _SearchScreenState extends State<SearchScreen> {
       _seenSearchIds.clear();
       _searchPage = 1;
       _searchReachedEnd = false;
+      _searchLoadFailed = false;
     });
 
     final token = ++_searchToken;
@@ -239,19 +255,34 @@ class _SearchScreenState extends State<SearchScreen> {
   Future<void> _loadMore() async {
     if (_isLoadingMore || _isLoading || _isLoadingRecommended) return;
     if (_hasSearched) {
-      if (!_searchReachedEnd) await _loadMoreSearch();
+      if (!_searchReachedEnd) {
+        if (_searchLoadFailed &&
+            DateTime.now().difference(_lastSearchFail).inSeconds < 3) {
+          return;
+        }
+        await _loadMoreSearch();
+      }
     } else if (_canRecommend) {
-      if (!_recReachedEnd) await _loadMoreRecommendations();
+      if (!_recReachedEnd) {
+        if (_recLoadFailed &&
+            DateTime.now().difference(_lastRecFail).inSeconds < 3) {
+          return;
+        }
+        await _loadMoreRecommendations();
+      }
     }
   }
 
   Future<void> _loadMoreSearch() async {
     if (_lastQuery.isEmpty || _isLoadingMore) return;
+    // A new search may have started while this fetch is in flight; only a
+    // batch that still belongs to the current query may be appended.
+    final token = _searchToken;
     setState(() => _isLoadingMore = true);
     final page = _searchPage + 1;
     try {
       final results = await BilibiliSdk.search(_lastQuery, page: page);
-      if (!mounted) return;
+      if (!mounted || token != _searchToken) return;
       final fresh = <Track>[];
       for (final t in results) {
         if (_seenSearchIds.add(t.id)) fresh.add(t);
@@ -259,10 +290,17 @@ class _SearchScreenState extends State<SearchScreen> {
       setState(() {
         _searchResults = [..._searchResults, ...fresh];
         _searchPage = page;
+        _searchLoadFailed = false;
         if (fresh.isEmpty) _searchReachedEnd = true;
       });
     } catch (e) {
       debugPrint('Load more search error: $e');
+      if (mounted && token == _searchToken) {
+        setState(() {
+          _searchLoadFailed = true;
+          _lastSearchFail = DateTime.now();
+        });
+      }
     } finally {
       if (mounted) setState(() => _isLoadingMore = false);
     }
@@ -270,16 +308,29 @@ class _SearchScreenState extends State<SearchScreen> {
 
   Future<void> _loadMoreRecommendations() async {
     if (_isLoadingMore) return;
+    // A fresh recommendation pass resets the seen-set and page while this is
+    // in flight; a stale batch must not be appended to the new list.
+    final pass = _recPass;
     setState(() => _isLoadingMore = true);
     final page = _recPage + 1;
     List<Track> tracks;
     try {
-      tracks =
-          await RecommendationEngine.recommend(page: page, excludeIds: _seenRecIds);
-    } catch (_) {
-      tracks = const [];
+      // Snapshot the seen-set: the engine reads it during the await, and a
+      // fresh pass may clear it while this fetch is still running.
+      tracks = await RecommendationEngine.recommend(
+          page: page, excludeIds: Set.of(_seenRecIds));
+    } catch (e) {
+      debugPrint('Load more recommendations error: $e');
+      if (mounted && pass == _recPass) {
+        setState(() {
+          _isLoadingMore = false;
+          _recLoadFailed = true;
+          _lastRecFail = DateTime.now();
+        });
+      }
+      return;
     }
-    if (!mounted) return;
+    if (!mounted || pass != _recPass) return;
     final fresh = <Track>[];
     for (final t in tracks) {
       if (_seenRecIds.add(t.id)) fresh.add(t);
@@ -288,6 +339,7 @@ class _SearchScreenState extends State<SearchScreen> {
       _recommendedTracks = [..._recommendedTracks, ...fresh];
       _recPage = page;
       _isLoadingMore = false;
+      _recLoadFailed = false;
       if (fresh.isEmpty) _recReachedEnd = true;
     });
   }
@@ -319,6 +371,18 @@ class _SearchScreenState extends State<SearchScreen> {
               style: TextStyle(color: AppColors.textFaint, fontSize: 12)),
         ),
       );
+    }
+    if (hasContent) {
+      final loadFailed = _hasSearched ? _searchLoadFailed : _recLoadFailed;
+      if (loadFailed) {
+        return const Padding(
+          padding: EdgeInsets.symmetric(vertical: 22),
+          child: Center(
+            child: Text('加载失败，上滑重试',
+                style: TextStyle(color: AppColors.textFaint, fontSize: 12)),
+          ),
+        );
+      }
     }
     return const SizedBox.shrink();
   }

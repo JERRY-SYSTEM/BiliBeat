@@ -227,6 +227,20 @@
 - **修复**（`lib/services/audio_player_handler.dart`）：失败路径在 `_reconcileActiveTrack()` 后补一次 `_broadcastState()`，把会话拉回播放器的真实状态。
 - **验证**：`flutter analyze` 无告警；handler 无 mock 基建，需真机复测「无网络冷启动点播放」路径。
 
+#### 🐛 Bug #58: 新查询进行中时，旧查询/旧推荐的分页结果混进新列表
+- **现象**：搜索页结果里混进别的关键词的歌曲；返回推荐页后列表被旧批次污染，真实结果被跳过。
+- **根因（两处分页竞态）**：
+  1. `_loadMoreSearch` 在 await 期间不校验 `_searchToken`：快速连搜两次时，第一次的下一页结果会被追加进第二次的结果列表（`_seenSearchIds`/`_searchPage` 已被新查询重置，追加的是 P2 数据）。
+  2. 推荐分页没有单调 pass 守卫：`_loadRecommendations`（重开分页、清空 `_seenRecIds`）进行中，`_loadMoreRecommendations` 的旧批次仍会以「新 pass 的页码」追加；且 `excludeIds` 直接传了会被并发清空的同一 Set 引用。
+- **修复**（`lib/screens/search_screen.dart`）：`_loadMoreSearch` 在 await 前捕获 `_searchToken`，回来后不匹配即丢弃；推荐分页新增单调 `_recPass` 计数器，新 pass 使所有在途旧批次失效；`excludeIds` 传 `Set.of(_seenRecIds)` 快照。顺带：分页失败不再静默吞掉——footer 显示「加载失败，上滑重试」，3 秒冷却后才重试，且失败不再误判为「没有更多了」。
+- **验证**：`flutter analyze` 无告警；竞态路径依赖真机时序，需复测「快速连搜不同关键词」与「推荐页翻页期间重进」两条路径。
+
+#### 🐛 Bug #59: 播放页下载环与曲目不联动，且被他曲下载进度拖着重绘
+- **现象**：播放页自动切到下一首后，主按钮仍显示上一首的下载进度环；任意一首歌在下载时，播放页每个 64 KiB 进度块都整页重建一次。
+- **根因**：`currentTrackStream` 切换 `_displayTrack` 时不刷新 `_downloadTask`（只有打开页面那一瞬取过）；`DownloadManager.updates` 监听器不按 track id 过滤，任何下载的进度都触发整页 `setState`。
+- **修复**（`lib/widgets/now_playing_sheet.dart`）：切换曲目时同步 `_downloadTask = _liveTaskFor(t.id)`；下载监听按 `changedId != _displayTrack.id` 过滤、任务对象未变则跳过，只有本曲目的进度才重绘进度环；`onApplyLyrics`/`onUpdateMetadata` 的 await 后补 `mounted` 守卫（此前页面关闭后回来会 setState 崩溃）。
+- **验证**：`flutter analyze` 无告警；需真机复测「自动连播后主按钮状态」与「他曲下载期间播放页流畅度」。
+
 #### 🐛 Bug #53: 歌手识别（交叉检验）拿不到标题里明明存在的歌手
 - **现象**：遥遥 / 有可能的夜晚 / 不舍 / 聊聊 四首都是周深的歌，识别结果却是 `2025生日直播`、`纯净版`、UP 主名等垃圾歌手。
 - **根因（交叉检验的信任链断裂）**：
