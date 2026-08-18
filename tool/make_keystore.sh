@@ -52,7 +52,9 @@ read -rs PASS
 echo
 
 umask 077
-cat > "$PROPS" <<PROPEOF
+# Quoted delimiter: a password containing $, backticks or backslashes must be
+# written verbatim, not shell-expanded.
+cat > "$PROPS" <<'PROPEOF'
 storeFile=bilibeat-release.jks
 storePassword=$PASS
 keyAlias=$ALIAS

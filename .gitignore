@@ -29,6 +29,10 @@ migrate_working_dir/
 # Flutter/Dart/Pub related
 **/doc/api/
 **/ios/Flutter/.last_build_id
+**/ios/Flutter/Generated.xcconfig
+# Xcode-generated ephemeral build state (also covers ios/Flutter/ephemeral/
+# and macos/Flutter/ephemeral/, incl. flutter_export_environment.sh).
+**/ephemeral/
 .dart_tool/
 .flutter-plugins
 .flutter-plugins-dependencies

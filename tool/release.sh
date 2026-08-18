@@ -73,7 +73,13 @@ if git rev-parse "v$NEW_SHORT" >/dev/null 2>&1; then
   exit 1
 fi
 
-sed -i '' "s/^version: .*$/version: $NEW_VERSION/" pubspec.yaml
+# sed -i needs a different invocation on macOS; the release machine may be
+# either, so branch instead of assuming one platform.
+if [ "$(uname)" = "Darwin" ]; then
+  sed -i '' "s/^version: .*$/version: $NEW_VERSION/" pubspec.yaml
+else
+  sed -i "s/^version: .*$/version: $NEW_VERSION/" pubspec.yaml
+fi
 grep -q "^version: $NEW_VERSION$" pubspec.yaml || {
   echo "error: failed to update pubspec.yaml" >&2; exit 1; }
 
@@ -88,7 +94,9 @@ TODAY=$(date +%F)
   printf '\n'
 } > /tmp/release_entry.md
 
-# Insert the entry right above the first existing version heading.
+# Insert the entry right above the first existing version heading. A
+# CHANGELOG.md with no heading is a broken repo state, not an empty one — the
+# entry would silently vanish, so fail loudly instead.
 awk '
   BEGIN { done = 0 }
   !done && /^## \[/ {
@@ -97,7 +105,12 @@ awk '
     done = 1
   }
   { print }
-' CHANGELOG.md > CHANGELOG.md.new
+  END { if (!done) exit 1 }
+' CHANGELOG.md > CHANGELOG.md.new || {
+  echo "error: no version heading in CHANGELOG.md — cannot place the entry" >&2
+  rm -f CHANGELOG.md.new /tmp/release_entry.md
+  exit 1
+}
 mv CHANGELOG.md.new CHANGELOG.md
 rm -f /tmp/release_entry.md
 
