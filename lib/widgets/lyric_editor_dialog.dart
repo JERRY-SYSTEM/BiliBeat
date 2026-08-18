@@ -113,8 +113,10 @@ class _LyricEditorDialogState extends State<LyricEditorDialog>
     _tabController.addListener(() {
       setState(() {});
     });
-    _titleController.addListener(() => setState(() {}));
-    _artistController.addListener(() => setState(() {}));
+    // No listener on the title/artist/cover controllers: nothing in build
+    // reads their text (fields own it, save reads it at 确认), so a keystroke
+    // used to rebuild the entire dialog — search results included — for
+    // nothing.
     _searchArtist = widget.artistName;
     _searchSong = widget.songTitle;
     _searchController.text = '${widget.artistName} ${widget.songTitle}'.trim();

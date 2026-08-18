@@ -83,8 +83,14 @@ class _TrackDownloadButtonState extends State<TrackDownloadButton> {
   }
 
   Future<void> _refresh() async {
+    // Rows recycle: by the time isDownloaded returns, this State may belong
+    // to a different track (didUpdateWidget swapped it). Only commit the
+    // result if the widget still shows the track we asked about.
+    final trackId = widget.track.id;
     final downloaded = await AudioDownloadService.isDownloaded(widget.track);
-    if (mounted) setState(() => _isDownloaded = downloaded);
+    if (mounted && widget.track.id == trackId) {
+      setState(() => _isDownloaded = downloaded);
+    }
   }
 
   /// One box, one glyph, one place.

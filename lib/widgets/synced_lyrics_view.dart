@@ -68,6 +68,11 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView> {
   double _topPadding = 160;
   double _lineWidth = 320;
 
+  /// System font scale from the build context; measurement must apply the
+  /// same scale the Text widgets render with, or rows misalign once the user
+  /// raises the OS font size.
+  TextScaler _textScaler = TextScaler.noScaling;
+
   static const Duration _browseGrace = Duration(seconds: 5);
 
   /// Average human auditory reaction time. The user always taps slightly
@@ -208,10 +213,10 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView> {
   // Layout helpers
   // ---------------------------------------------------------------------------
 
-  /// Measured row height, memoised per (text, state, width).
+  /// Measured row height, memoised per (text, state, width, font scale).
   double _itemHeight(LyricLine line, bool isActive) {
     final key = '${line.text} ${line.translation ?? ''} $isActive'
-        ' ${_lineWidth.round()}';
+        ' ${_lineWidth.round()} ${_textScaler.scale(100)}';
     final cached = _heightCache[key];
     if (cached != null) return cached;
 
@@ -236,6 +241,7 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView> {
         style: TextStyle(fontSize: fontSize, fontWeight: weight, height: 1.35),
       ),
       textDirection: TextDirection.ltr,
+      textScaler: _textScaler,
     )..layout(maxWidth: _lineWidth);
     final height = painter.height;
     painter.dispose();
@@ -255,6 +261,7 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView> {
         _viewportHeight = constraints.maxHeight;
         _lineWidth = constraints.maxWidth;
         _topPadding = _viewportHeight * 0.42;
+        _textScaler = MediaQuery.textScalerOf(context);
 
         return Stack(
           children: [

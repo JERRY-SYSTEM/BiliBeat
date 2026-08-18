@@ -100,8 +100,10 @@ class TrackOptionsMenu extends StatefulWidget {
 
                           if (newPlName != null && newPlName.trim().isNotEmpty) {
                             final created = await DatabaseService.createPlaylist(newPlName);
+                            // One persist for the whole batch, not a full-file
+                            // rewrite per track.
+                            await DatabaseService.addTracksToPlaylist(created.id, tracks);
                             for (final t in tracks) {
-                              await DatabaseService.addTrackToPlaylist(created.id, t);
                               DownloadManager.instance.startDownload(t);
                             }
                             if (ctx.mounted) Navigator.pop(ctx);
@@ -129,8 +131,8 @@ class TrackOptionsMenu extends StatefulWidget {
                           title: Text(pl.name, style: const TextStyle(color: AppColors.textPrimary)),
                           subtitle: Text('${pl.tracks.length} 首', style: const TextStyle(color: AppColors.textMuted, fontSize: 12)),
                           onTap: () async {
+                            await DatabaseService.addTracksToPlaylist(pl.id, tracks);
                             for (final t in tracks) {
-                              await DatabaseService.addTrackToPlaylist(pl.id, t);
                               DownloadManager.instance.startDownload(t);
                             }
                             if (ctx.mounted) Navigator.pop(ctx);

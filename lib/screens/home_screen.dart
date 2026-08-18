@@ -335,6 +335,56 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  /// One row of the 下载中 section, built lazily like the playlists below it.
+  Widget _downloadingTaskTile(int index) {
+    final task = _downloadingTasks[index];
+    return Padding(
+      padding: const EdgeInsets.only(bottom: TrackRow.gap),
+      child: TrackRow(
+        child: Row(
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(AppRadius.sm),
+              child: CachedCoverImage(
+                url: task.track.coverUrl,
+                width: 48,
+                height: 48,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  RepaintBoundary(
+                    child: MarqueeText(
+                      text: task.track.title,
+                      phase: (index % 5) / 5,
+                      style: const TextStyle(
+                          color: AppColors.textPrimary,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 14,
+                          height: 1.3),
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    task.track.uploader,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                        color: AppColors.textMuted, fontSize: 12),
+                  ),
+                ],
+              ),
+            ),
+            TrackDownloadButton(track: task.track, size: 22),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _newPlaylistBar() {
     return TrackRow(
       onTap: _openCreatePlaylistDialog,
@@ -374,17 +424,18 @@ class _HomeScreenState extends State<HomeScreen> {
     final otherPlaylists =
         _playlists.where((p) => p.id != Playlist.favoritesId).toList();
 
-    return ListView(
-      padding: EdgeInsets.only(
-        left: 20,
-        right: 20,
-        top: 20,
-        bottom: MiniPlayer.totalHeight(context) + 24,
-      ),
-      children: [
-        // No "聆听" heading: the tab bar above already names the page, and
-        // repeating it one line below was the same word twice.
-        // Quick Access Cards: Downloaded Tracks & Favorites
+    // Slivers instead of one eager ListView(children:): long playlists and
+    // an active download list only pay for the rows actually on screen. The
+    // static headers stay in a fixed child-list delegate (cheap, count known).
+    return CustomScrollView(
+      slivers: [
+        SliverPadding(
+          padding: const EdgeInsets.only(left: 20, right: 20, top: 20),
+          sliver: SliverList(
+            delegate: SliverChildListDelegate([
+              // No "聆听" heading: the tab bar above already names the page, and
+              // repeating it one line below was the same word twice.
+              // Quick Access Cards: Downloaded Tracks & Favorites
         Row(
           children: [
             Expanded(
@@ -418,136 +469,119 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
 
         if (_downloadingTasks.isNotEmpty) ...[
-          const SizedBox(height: 24),
-          const Text('下载中', style: AppTypography.title),
-          const SizedBox(height: 12),
-          ..._downloadingTasks.indexed.map(
-            (entry) {
-              final index = entry.$1;
-              final task = entry.$2;
-              return Padding(
-              padding: const EdgeInsets.only(bottom: TrackRow.gap),
-              child: TrackRow(
-                child: Row(
-                  children: [
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(AppRadius.sm),
-                      child: CachedCoverImage(
-                        url: task.track.coverUrl,
-                        width: 48,
-                        height: 48,
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          RepaintBoundary(
-                            child: MarqueeText(
-                              text: task.track.title,
-                              phase: (index % 5) / 5,
-                              style: const TextStyle(
-                                  color: AppColors.textPrimary,
-                                  fontWeight: FontWeight.w600,
-                                  fontSize: 14,
-                                  height: 1.3),
-                            ),
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            task.track.uploader,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                                color: AppColors.textMuted, fontSize: 12),
-                          ),
-                        ],
-                      ),
-                    ),
-                    TrackDownloadButton(track: task.track, size: 22),
-                  ],
-                ),
-              ),
-              );
-            },
+                const SizedBox(height: 24),
+                const Text('下载中', style: AppTypography.title),
+                const SizedBox(height: 12),
+              ],
+
+              const SizedBox(height: 24),
+
+              // Playlists Section Header
+              const Text('我的歌单', style: AppTypography.title),
+
+              const SizedBox(height: 12),
+            ]),
           ),
-        ],
+        ),
 
-        const SizedBox(height: 24),
-
-        // Playlists Section Header
-        const Text('我的歌单', style: AppTypography.title),
-
-        const SizedBox(height: 12),
-
-        // Playlists: a plain vertical stack of bars, laid out by the page's
-        // own ListView. A horizontal rail hid every playlist past the second
-        // one behind a sideways scroll nobody thinks to try, on a page that
-        // already scrolls downwards.
-        ...otherPlaylists.map(_playlistBar),
-        _newPlaylistBar(),
-
-        const SizedBox(height: 28),
-
-        // Recently Played Section
-        const Text('最近播放', style: AppTypography.title),
-
-        const SizedBox(height: 14),
-
-        if (widget.recentlyPlayed.isEmpty)
-          const EmptyState(
-            icon: Icons.history_rounded,
-            title: '暂无播放记录',
-            subtitle: '去搜索页找歌',
-          )
-        else
-          SizedBox(
-            height: 180,
-            child: ListView.builder(
-              scrollDirection: Axis.horizontal,
-              itemCount: widget.recentlyPlayed.length,
-              itemBuilder: (context, index) {
-                final track = widget.recentlyPlayed[index];
-                return GestureDetector(
-                  onTap: () => widget.onSelectTrack(track),
-                  onLongPress: () {
-                    TrackOptionsMenu.show(context, track, onTrackChanged: _loadData);
-                  },
-                  child: Container(
-                    width: 130,
-                    margin: const EdgeInsets.only(right: 14),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(14),
-                          child: CachedCoverImage(
-                            url: track.coverUrl,
-                            width: 130,
-                            height: 130,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          track.title,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(color: AppColors.textPrimary, fontSize: 14, fontWeight: FontWeight.w600),
-                        ),
-                        Text(
-                          track.uploader,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(color: AppColors.textMuted, fontSize: 12),
-                        ),
-                      ],
-                    ),
-                  ),
-                );
-              },
+        if (_downloadingTasks.isNotEmpty)
+          SliverPadding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            sliver: SliverList.builder(
+              itemCount: _downloadingTasks.length,
+              itemBuilder: (context, index) => _downloadingTaskTile(index),
             ),
           ),
+
+        // Playlists: a plain vertical stack of bars, laid out by the page's
+        // own scroll view. A horizontal rail hid every playlist past the
+        // second one behind a sideways scroll nobody thinks to try, on a page
+        // that already scrolls downwards.
+        SliverPadding(
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          sliver: SliverList.builder(
+            itemCount: otherPlaylists.length,
+            itemBuilder: (context, index) =>
+                _playlistBar(otherPlaylists[index]),
+          ),
+        ),
+
+        SliverPadding(
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          sliver: SliverToBoxAdapter(child: _newPlaylistBar()),
+        ),
+
+        SliverPadding(
+          padding: EdgeInsets.fromLTRB(
+              20, 0, 20, MiniPlayer.totalHeight(context) + 24),
+          sliver: SliverToBoxAdapter(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const SizedBox(height: 28),
+
+                // Recently Played Section
+                const Text('最近播放', style: AppTypography.title),
+
+                const SizedBox(height: 14),
+
+        if (widget.recentlyPlayed.isEmpty)
+                  const EmptyState(
+                    icon: Icons.history_rounded,
+                    title: '暂无播放记录',
+                    subtitle: '去搜索页找歌',
+                  )
+                else
+                  SizedBox(
+                    height: 180,
+                    child: ListView.builder(
+                      scrollDirection: Axis.horizontal,
+                      itemCount: widget.recentlyPlayed.length,
+                      itemBuilder: (context, index) {
+                        final track = widget.recentlyPlayed[index];
+                        return GestureDetector(
+                          onTap: () => widget.onSelectTrack(track),
+                          onLongPress: () {
+                            TrackOptionsMenu.show(context, track, onTrackChanged: _loadData);
+                          },
+                          child: Container(
+                            width: 130,
+                            margin: const EdgeInsets.only(right: 14),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                ClipRRect(
+                                  borderRadius: BorderRadius.circular(14),
+                                  child: CachedCoverImage(
+                                    url: track.coverUrl,
+                                    width: 130,
+                                    height: 130,
+                                  ),
+                                ),
+                                const SizedBox(height: 8),
+                                Text(
+                                  track.title,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(color: AppColors.textPrimary, fontSize: 14, fontWeight: FontWeight.w600),
+                                ),
+                                Text(
+                                  track.uploader,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(color: AppColors.textMuted, fontSize: 12),
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
       ],
     );
   }

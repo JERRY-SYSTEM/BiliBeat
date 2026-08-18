@@ -44,8 +44,17 @@ class TasteProfile {
   /// Chinese has no word boundaries, so CJK runs are indexed as character
   /// bigrams — "大鱼海棠" contributes 大鱼/鱼海/海棠, which is enough for
   /// "more like this" without shipping a segmenter.
+  ///
+  /// The rule-based [LyricsEngine.cleanTitle] parse is the expensive part, and
+  /// the same title recurs across seed results (the same song uploaded by
+  /// different accounts), so memoise per raw title with a bounded cache.
+  static final Map<String, Set<String>> _tokenCache = {};
+  static const int _tokenCacheCap = 256;
+
   static Set<String> tokenize(String text) {
     if (text.isEmpty) return const {};
+    final cached = _tokenCache[text];
+    if (cached != null) return cached;
     final cleaned = LyricsEngine.cleanTitle(text)['songTitle'] ?? text;
     final tokens = <String>{};
 
@@ -58,6 +67,8 @@ class TasteProfile {
         tokens.add(han.substring(i, i + 2));
       }
     }
+    if (_tokenCache.length >= _tokenCacheCap) _tokenCache.clear();
+    _tokenCache[text] = tokens;
     return tokens;
   }
 
