@@ -29,3 +29,36 @@ jobs:
 
       - name: Test
         run: flutter test
+
+  # analyze+test never compiled a single platform — whole-plugin breakage (a
+  # bad SPM/CocoaPods file, a missing resource, a native API gone in a plugin
+  # update) only surfaced at release time. Debug builds are cheap and compile
+  # the real native trees.
+  build:
+    name: Build (${{ matrix.platform }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: android
+            os: ubuntu-latest
+            command: flutter build apk --debug
+          - platform: macos
+            os: macos-latest
+            command: flutter build macos --debug
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          # Keep in sync with the local dev SDK (`flutter --version`).
+          flutter-version: 3.44.8
+          channel: stable
+          cache: true
+
+      - name: Fetch dependencies
+        run: flutter pub get
+
+      - name: Compile
+        run: ${{ matrix.command }}
