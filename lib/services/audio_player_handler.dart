@@ -249,7 +249,15 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
     unawaited(DatabaseService.addRecentlyPlayed(track));
     _duration = Duration(seconds: track.duration > 0 ? track.duration : 180);
     _durationController.add(_duration);
-    _broadcastState();
+    // iOS keeps the last MPNowPlayingInfo progress while a new AVPlayer item
+    // is being installed. Publish a fresh zero-position/loading snapshot
+    // immediately so Dynamic Island and Control Center cannot retain the
+    // completed position of the previous item.
+    _broadcastState(
+      processingOverride: AudioProcessingState.loading,
+      positionOverride: Duration.zero,
+      bufferedPositionOverride: Duration.zero,
+    );
   }
 
   // ---------------------------------------------------------------------------
@@ -745,7 +753,11 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
     _broadcastState();
   }
 
-  void _broadcastState({AudioProcessingState? processingOverride}) {
+  void _broadcastState({
+    AudioProcessingState? processingOverride,
+    Duration? positionOverride,
+    Duration? bufferedPositionOverride,
+  }) {
     final playing = _player.playing;
     final mapped = const {
       ja.ProcessingState.idle: AudioProcessingState.idle,
@@ -769,8 +781,8 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
       androidCompactActionIndices: const [0, 1, 2],
       processingState: processingOverride ?? mapped ?? AudioProcessingState.idle,
       playing: playing,
-      updatePosition: _player.position,
-      bufferedPosition: _player.bufferedPosition,
+      updatePosition: positionOverride ?? _player.position,
+      bufferedPosition: bufferedPositionOverride ?? _player.bufferedPosition,
       speed: _player.speed,
       repeatMode: _loopMode == LoopMode.one
           ? AudioServiceRepeatMode.one
