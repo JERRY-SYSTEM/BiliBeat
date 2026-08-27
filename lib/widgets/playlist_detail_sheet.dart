@@ -24,6 +24,7 @@ class PlaylistDetailSheet extends StatefulWidget {
   final Playlist playlist;
   final TrackAction onSelectTrack;
   final TrackAction? onPlayOnly;
+  final Future<void> Function(Track track)? onPlayNext;
   final void Function(List<Track> tracks, {bool shuffle})? onPlayCollection;
   final VoidCallback? onPlaylistUpdated;
   final VoidCallback? onClose;
@@ -34,6 +35,7 @@ class PlaylistDetailSheet extends StatefulWidget {
     required this.playlist,
     required this.onSelectTrack,
     this.onPlayOnly,
+    this.onPlayNext,
     this.onPlayCollection,
     this.onPlaylistUpdated,
     this.onClose,
@@ -45,6 +47,7 @@ class PlaylistDetailSheet extends StatefulWidget {
     required Playlist playlist,
     required TrackAction onSelectTrack,
     TrackAction? onPlayOnly,
+    Future<void> Function(Track track)? onPlayNext,
     void Function(List<Track> tracks, {bool shuffle})? onPlayCollection,
     VoidCallback? onPlaylistUpdated,
     VoidCallback? onClose,
@@ -59,6 +62,7 @@ class PlaylistDetailSheet extends StatefulWidget {
         playlist: playlist,
         onSelectTrack: onSelectTrack,
         onPlayOnly: onPlayOnly,
+        onPlayNext: onPlayNext,
         onPlayCollection: onPlayCollection,
         onPlaylistUpdated: onPlaylistUpdated,
         onClose: onClose ?? () => Navigator.pop(context),
@@ -321,10 +325,10 @@ class _PlaylistDetailSheetState extends State<PlaylistDetailSheet> {
                       : () {
                           Haptics.medium();
                           widget.onPlayCollection?.call(_playableQueue,
-                              shuffle: true);
+                              shuffle: false);
                         },
                   icon: const Icon(Icons.shuffle_rounded, size: 22),
-                  label: const Text('随机播放',
+                  label: const Text('播放全部',
                       style: TextStyle(
                           fontSize: 16, fontWeight: FontWeight.bold)),
                   style: ElevatedButton.styleFrom(
@@ -534,14 +538,9 @@ class _PlaylistDetailSheetState extends State<PlaylistDetailSheet> {
               TrackDownloadButton(
                 track: track,
                 size: 24,
+                isPlayNext: true,
                 onPlay: () {
-                  if (widget.onPlayOnly != null) {
-                    widget.onPlayOnly!(track,
-                        queue: _playableQueue);
-                  } else {
-                    widget.onSelectTrack(track,
-                        queue: _playableQueue);
-                  }
+                  widget.onPlayNext?.call(track);
                 },
               ),
               IconButton(

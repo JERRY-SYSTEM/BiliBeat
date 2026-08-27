@@ -21,12 +21,14 @@ class TrackDownloadButton extends StatefulWidget {
 
   /// Called when the track is already downloaded and the user taps play.
   final VoidCallback? onPlay;
+  final bool isPlayNext;
 
   const TrackDownloadButton({
     super.key,
     required this.track,
     this.size = 26,
     this.onPlay,
+    this.isPlayNext = false,
   });
 
   @override
@@ -121,13 +123,16 @@ class _TrackDownloadButtonState extends State<TrackDownloadButton> {
       onTap = null;
       tooltip = '下载中';
     } else if (_isDownloaded) {
-      glyph = Icon(Icons.play_circle_fill,
-          color: context.palette.accent, size: widget.size + 4);
+      glyph = Icon(
+        widget.isPlayNext ? Icons.queue_play_next_rounded : Icons.play_circle_fill,
+        color: widget.isPlayNext ? AppColors.textSecondary : context.palette.accent,
+        size: widget.isPlayNext ? widget.size : widget.size + 4,
+      );
       onTap = () {
         Haptics.light();
         widget.onPlay?.call();
       };
-      tooltip = '播放';
+      tooltip = widget.isPlayNext ? '下一首播放' : '播放';
     } else {
       glyph = Icon(Icons.download_rounded,
           color: AppColors.textSecondary, size: widget.size);
