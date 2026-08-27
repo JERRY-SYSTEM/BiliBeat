@@ -63,9 +63,9 @@ class _PlayerSeekBarState extends State<PlayerSeekBar> {
             SliderTheme(
               data: SliderTheme.of(context).copyWith(
                 trackHeight: 4,
-                activeTrackColor: AppColors.accent,
-                thumbColor: AppColors.accent,
-                overlayColor: AppColors.accent22,
+                activeTrackColor: context.palette.accent,
+                thumbColor: context.palette.accent,
+                overlayColor: context.palette.accent.withValues(alpha: .14),
                 thumbShape:
                     const RoundSliderThumbShape(enabledThumbRadius: 6),
                 overlayShape:

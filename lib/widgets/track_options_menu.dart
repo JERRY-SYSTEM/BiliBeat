@@ -66,8 +66,8 @@ class TrackOptionsMenu extends StatefulWidget {
                         style: const TextStyle(color: AppColors.textPrimary, fontSize: 18, fontWeight: FontWeight.bold),
                       ),
                       TextButton.icon(
-                        icon: const Icon(Icons.add, color: AppColors.accent, size: 20),
-                        label: const Text('新建歌单', style: TextStyle(color: AppColors.accent)),
+                        icon: Icon(Icons.add, color: context.palette.accent, size: 20),
+                        label: Text('新建歌单', style: TextStyle(color: context.palette.accent)),
                         onPressed: () async {
                           final controller = TextEditingController();
                           final newPlName = await showDialog<String>(
@@ -89,7 +89,7 @@ class TrackOptionsMenu extends StatefulWidget {
                                   onPressed: () => Navigator.pop(dCtx),
                                 ),
                                 TextButton(
-                                  child: const Text('创建', style: TextStyle(color: AppColors.accent)),
+                                  child: Text('创建', style: TextStyle(color: context.palette.accent)),
                                   onPressed: () => Navigator.pop(dCtx, controller.text),
                                 ),
                               ],
@@ -126,7 +126,7 @@ class TrackOptionsMenu extends StatefulWidget {
                         return ListTile(
                           leading: Icon(
                             pl.id == Playlist.favoritesId ? Icons.favorite : Icons.queue_music,
-                            color: pl.id == Playlist.favoritesId ? AppColors.accent : AppColors.textSecondary,
+                            color: pl.id == Playlist.favoritesId ? context.palette.accent : context.palette.textSecondary,
                           ),
                           title: Text(pl.name, style: const TextStyle(color: AppColors.textPrimary)),
                           subtitle: Text('${pl.tracks.length} 首', style: const TextStyle(color: AppColors.textMuted, fontSize: 12)),
@@ -325,7 +325,7 @@ class _TrackOptionsMenuState extends State<TrackOptionsMenu> {
           ListTile(
             leading: Icon(
               _isFav ? Icons.favorite : Icons.favorite_border,
-              color: _isFav ? AppColors.accent : AppColors.textPrimary,
+              color: _isFav ? context.palette.accent : context.palette.textPrimary,
             ),
             title: Text(
               _isFav ? '取消收藏' : '添加至收藏',

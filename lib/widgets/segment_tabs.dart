@@ -93,9 +93,9 @@ class _SegmentTabsState extends State<SegmentTabs> {
               bottom: 0,
               child: Container(
                 decoration: BoxDecoration(
-                  color: AppColors.accent14,
+                  color: context.palette.accent14,
                   borderRadius: BorderRadius.circular(AppRadius.pill),
-                  border: Border.all(color: AppColors.accent30),
+                  border: Border.all(color: context.palette.accent30),
                 ),
               ),
             );

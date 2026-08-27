@@ -295,7 +295,7 @@ class _CachedCoverImageState extends State<CachedCoverImage> {
           decoration: BoxDecoration(
             gradient: LinearGradient(
               colors: [
-                AppColors.accent.withValues(alpha: 0.35),
+                context.palette.accent.withValues(alpha: 0.35),
                 AppColors.surfaceNeutralDeep,
               ],
               begin: Alignment.topLeft,
@@ -305,7 +305,7 @@ class _CachedCoverImageState extends State<CachedCoverImage> {
           child: Center(
             child: Icon(
               Icons.music_note_rounded,
-              color: AppColors.accent,
+              color: context.palette.accent,
               size: (widget.width * 0.4).clamp(24.0, 80.0),
             ),
           ),

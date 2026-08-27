@@ -87,7 +87,7 @@ class _AddLocalTracksSheetState extends State<AddLocalTracksSheet> {
                     style: TextStyle(
                         color: _selectedIds.isEmpty
                             ? AppColors.textFaint
-                            : AppColors.accent,
+                            : context.palette.accent,
                         fontWeight: FontWeight.bold)),
               ),
             ],
@@ -129,7 +129,7 @@ class _AddLocalTracksSheetState extends State<AddLocalTracksSheet> {
                               ? Icons.check_circle_rounded
                               : Icons.radio_button_unchecked_rounded,
                           color: isChecked
-                              ? AppColors.accent
+                              ? context.palette.accent
                               : AppColors.textFaint,
                         ),
                   onTap: isAlreadyInPlaylist

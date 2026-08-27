@@ -531,20 +531,16 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
                           ),
                         ),
                         IconButton(
+                          tooltip: '设置',
+                          onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SettingsPage())),
+                          icon: Icon(Icons.settings_outlined, color: context.palette.textSecondary),
+                        ),
+                        IconButton(
                           tooltip: BiliAuthController.instance.session?.isLoggedIn == true ? '已登录' : '登录',
                           onPressed: _openLogin,
                           icon: BiliAuthController.instance.session?.face?.isNotEmpty == true
                               ? CircleAvatar(radius: 15, backgroundImage: NetworkImage(BiliAuthController.instance.session!.face!))
                               : Icon(Icons.account_circle_outlined, color: context.palette.textSecondary),
-                        ),
-                        IconButton(
-                          tooltip: '设置',
-                          onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SettingsPage())),
-                          icon: Icon(Icons.settings_outlined, color: context.palette.textSecondary),
-                        ),
-                        Padding(
-                          padding: const EdgeInsets.only(left: 4, right: 6),
-                          child: Image.asset('assets/logo.png', height: 32),
                         ),
                       ],
                     ),

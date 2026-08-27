@@ -390,7 +390,7 @@ class _NowPlayingSheetState extends State<NowPlayingSheet> {
             icon: Icon(
               _showLyrics ? Icons.lyrics_rounded : Icons.lyrics_outlined,
               color: _showLyrics && _isActive
-                  ? AppColors.accent
+                  ? context.palette.accent
                   : (_isActive ? AppColors.textSecondary : AppColors.textFaint),
               size: 22,
             ),
@@ -557,7 +557,7 @@ class _NowPlayingSheetState extends State<NowPlayingSheet> {
       child: IconButton(
         icon: Icon(
           _isFavorite ? Icons.favorite_rounded : Icons.favorite_border_rounded,
-          color: _isFavorite ? AppColors.accent : AppColors.textMuted,
+          color: _isFavorite ? context.palette.accent : context.palette.textMuted,
           size: 26,
         ),
         tooltip: _isFavorite ? '取消收藏' : '收藏',
@@ -622,15 +622,15 @@ class _NowPlayingSheetState extends State<NowPlayingSheet> {
       height: 68,
       decoration: BoxDecoration(
         shape: BoxShape.circle,
-        gradient: filled ? AppColors.primaryGradient : null,
+        gradient: filled ? context.palette.primaryGradient : null,
         color: filled ? null : AppColors.white12,
         border: filled
             ? null
             : Border.all(color: AppColors.hairlineStrong),
         boxShadow: filled
-            ? const [
+            ? [
                 BoxShadow(
-                  color: AppColors.accent30,
+                  color: context.palette.accent30,
                   blurRadius: 22,
                   offset: Offset(0, 6),
                 ),
@@ -680,7 +680,7 @@ class _NowPlayingSheetState extends State<NowPlayingSheet> {
       width: 48,
       child: IconButton(
         icon: Icon(icon,
-            color: active ? AppColors.accent : AppColors.textMuted, size: 24),
+            color: active ? context.palette.accent : context.palette.textMuted, size: 24),
         tooltip: label,
         onPressed: () {
           Haptics.medium();
