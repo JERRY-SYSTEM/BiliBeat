@@ -127,7 +127,7 @@ class _SegmentTabsState extends State<SegmentTabs> {
         child: Text(
           widget.labels[index],
           style: TextStyle(
-            color: active ? AppColors.textPrimary : AppColors.textMuted,
+            color: active ? context.palette.textPrimary : context.palette.textMuted,
             fontSize: widget.fontSize,
             fontWeight: FontWeight.w700,
             letterSpacing: -0.3,
