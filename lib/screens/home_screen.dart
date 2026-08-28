@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:hugeicons/hugeicons.dart';
 import '../models/track.dart';
 import '../models/playlist.dart';
 import '../services/database_service.dart';
@@ -439,14 +440,14 @@ class _HomeScreenState extends State<HomeScreen> {
           padding: const EdgeInsets.only(left: 20, right: 20, top: 20),
           sliver: SliverList(
             delegate: SliverChildListDelegate([
-              // No "聆听" heading: the tab bar above already names the page, and
+              // No "主页" heading: the tab bar above already names the page, and
               // repeating it one line below was the same word twice.
               // Quick Access Cards: Downloaded Tracks & Favorites
         Row(
           children: [
             Expanded(
               child: _quickCard(
-                icon: Icons.download_done_rounded,
+                icon: Icons.download_rounded,
                 gradient: [_palette.accent.withValues(alpha: .72), _palette.accent],
                 title: '本地',
                 subtitle: _downloadingTasks.isEmpty
@@ -485,7 +486,7 @@ class _HomeScreenState extends State<HomeScreen> {
               // Playlists Section Header
               Row(children: [
                 const Expanded(child: Text('在线歌单', style: AppTypography.title)),
-                IconButton(onPressed: widget.onImportOnlinePlaylist, icon: const Icon(Icons.cloud_download_outlined), tooltip: '导入在线歌单'),
+                IconButton(onPressed: widget.onImportOnlinePlaylist, icon: const HugeIcon(icon: HugeIcons.strokeRoundedFolderInput), tooltip: '导入在线歌单'),
               ]),
 
               const SizedBox(height: 12),

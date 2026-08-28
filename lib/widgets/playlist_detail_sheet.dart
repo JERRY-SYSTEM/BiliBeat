@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:hugeicons/hugeicons.dart';
 import '../theme/app_theme.dart';
 import '../theme/haptics.dart';
 import '../models/playlist.dart';
@@ -233,8 +234,8 @@ class _PlaylistDetailSheetState extends State<PlaylistDetailSheet> {
                     ),
                   ),
                   IconButton(
-                    icon: Icon(
-                      _isEditMode ? Icons.done_rounded : Icons.edit_outlined,
+                    icon: HugeIcon(
+                      icon: _isEditMode ? HugeIcons.strokeRoundedTick01 : HugeIcons.strokeRoundedEdit02,
                       color: _isEditMode
                           ? context.palette.accent
                           : AppColors.textSecondary,
@@ -292,15 +293,15 @@ class _PlaylistDetailSheetState extends State<PlaylistDetailSheet> {
                   ),
                   if (!_isVirtualDownloads && !_isFavorites && !_isEditMode) ...[
                     IconButton(
-                      icon: const Icon(Icons.image_outlined,
+                      icon: const HugeIcon(icon: HugeIcons.strokeRoundedImage02,
                           color: AppColors.textSecondary, size: 22),
                       tooltip: '更换封面',
                       onPressed: _pickCover,
                     ),
                     IconButton(
-                      icon: Icon(_currentPlaylist.isOnline
-                          ? Icons.cloud_sync_outlined
-                          : Icons.add_rounded,
+                      icon: HugeIcon(icon: _currentPlaylist.isOnline
+                          ? HugeIcons.strokeRoundedArrowReloadHorizontal
+                          : HugeIcons.strokeRoundedAdd01,
                           color: AppColors.textSecondary, size: 24),
                       tooltip: _currentPlaylist.isOnline ? '同步在线歌单' : '添加本地曲目',
                       onPressed: _currentPlaylist.isOnline
@@ -327,7 +328,7 @@ class _PlaylistDetailSheetState extends State<PlaylistDetailSheet> {
                           widget.onPlayCollection?.call(_playableQueue,
                               shuffle: false);
                         },
-                  icon: const Icon(Icons.shuffle_rounded, size: 22),
+                icon: const HugeIcon(icon: HugeIcons.strokeRoundedPlayCircle02, size: 22),
                   label: const Text('播放全部',
                       style: TextStyle(
                           fontSize: 16, fontWeight: FontWeight.bold)),
@@ -544,7 +545,7 @@ class _PlaylistDetailSheetState extends State<PlaylistDetailSheet> {
                 },
               ),
               IconButton(
-                icon: const Icon(Icons.add,
+              icon: const HugeIcon(icon: HugeIcons.strokeRoundedFolderAdd,
                     color: AppColors.textSecondary,
                     size: 22),
                 tooltip: '添加至歌单',
@@ -571,10 +572,8 @@ class _PlaylistDetailSheetState extends State<PlaylistDetailSheet> {
         color: AppColors.danger.withValues(alpha: 0.18),
         borderRadius: BorderRadius.circular(12),
       ),
-      child: Icon(
-        _isVirtualDownloads
-            ? Icons.delete_outline_rounded
-            : Icons.playlist_remove_rounded,
+      child: HugeIcon(
+        icon: HugeIcons.strokeRoundedDelete02,
         color: AppColors.danger,
       ),
     );

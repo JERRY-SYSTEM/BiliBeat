@@ -56,13 +56,13 @@ class _CacheSettingsPageState extends State<CacheSettingsPage> {
   @override Widget build(BuildContext context) {
     final palette = context.palette;
     return Scaffold(
-      appBar: AppBar(title: const Text('缓存管理'), actions: [IconButton(onPressed: _loading ? null : _toggleAll, tooltip: '全选/取消全选', icon: const HugeIcon(icon: HugeIcons.strokeRoundedMenu09))]),
+      appBar: AppBar(title: const Text('缓存管理'), actions: [IconButton(onPressed: _loading ? null : _toggleAll, tooltip: '全选/取消全选', icon: const HugeIcon(icon: HugeIcons.strokeRoundedMore03))]),
       body: _loading ? const Center(child: CircularProgressIndicator()) : ListView(padding: const EdgeInsets.fromLTRB(16, 8, 16, 24), children: [
         Text('缓存总量 ${_formatBytes(_total)}', style: TextStyle(color: palette.textSecondary)),
         const SizedBox(height: 12),
         if (_buckets.isEmpty) Padding(padding: const EdgeInsets.all(32), child: Center(child: Text('暂无缓存', style: TextStyle(color: palette.textSecondary)))) else ..._buckets.map(_bucketTile),
         const SizedBox(height: 16),
-        FilledButton.icon(onPressed: _busy || _selectedBytes == 0 ? null : _deleteSelected, icon: const HugeIcon(icon: HugeIcons.strokeRoundedCancel01), label: Text(_busy ? '删除中…' : '删除所选缓存 ${_formatBytes(_selectedBytes)}')),
+        FilledButton.icon(onPressed: _busy || _selectedBytes == 0 ? null : _deleteSelected, icon: const HugeIcon(icon: HugeIcons.strokeRoundedDelete02), label: Text(_busy ? '删除中…' : '删除所选缓存 ${_formatBytes(_selectedBytes)}')),
       ]),
     );
   }
@@ -73,7 +73,7 @@ class _CacheSettingsPageState extends State<CacheSettingsPage> {
     return CheckboxListTile(
       value: _selected.contains(key),
       onChanged: _busy ? null : (value) => setState(() => value == true ? _selected.add(key) : _selected.remove(key)),
-      secondary: track == null ? HugeIcon(icon: HugeIcons.strokeRoundedFolder01, color: context.palette.accent) : (track.coverUrl.isEmpty ? HugeIcon(icon: HugeIcons.strokeRoundedHeadphones, color: context.palette.accent) : ClipRRect(borderRadius: BorderRadius.circular(AppRadius.sm), child: CachedCoverImage(url: track.coverUrl, width: 48, height: 48))),
+      secondary: track == null ? HugeIcon(icon: HugeIcons.strokeRoundedFolderUnknown, color: context.palette.accent) : (track.coverUrl.isEmpty ? HugeIcon(icon: HugeIcons.strokeRoundedHeadphones, color: context.palette.accent) : ClipRRect(borderRadius: BorderRadius.circular(AppRadius.sm), child: CachedCoverImage(url: track.coverUrl, width: 48, height: 48))),
       title: Text(track?.title ?? '其它', maxLines: 1, overflow: TextOverflow.ellipsis),
       subtitle: Text(track == null ? '无法关联到具体歌曲的缓存' : '${track.uploader} · ${_formatBytes(bucket.bytes)}', maxLines: 1, overflow: TextOverflow.ellipsis),
       controlAffinity: ListTileControlAffinity.trailing,

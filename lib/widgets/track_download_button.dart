@@ -124,7 +124,7 @@ class _TrackDownloadButtonState extends State<TrackDownloadButton> {
       tooltip = '下载中';
     } else if (_isDownloaded) {
       glyph = Icon(
-        widget.isPlayNext ? Icons.queue_play_next_rounded : Icons.play_circle_fill,
+        widget.isPlayNext ? Icons.playlist_add_rounded : Icons.play_circle_fill,
         color: widget.isPlayNext ? AppColors.textSecondary : context.palette.accent,
         size: widget.isPlayNext ? widget.size : widget.size + 4,
       );

@@ -21,7 +21,7 @@ class _SettingsPageState extends State<SettingsPage> {
     body: ListView(padding: const EdgeInsets.fromLTRB(16, 8, 16, 24), children: [
       _entry(context, icon: HugeIcons.strokeRoundedShirt01, title: '外观设置', subtitle: '主题模式与主题色', onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AppearanceSettingsPage()))),
       _entry(context, icon: HugeIcons.strokeRoundedAudioWave01, title: '默认音质', subtitle: _qualityLabel(settings.defaultAudioQuality), onTap: () => _showQuality(context)),
-      _entry(context, icon: HugeIcons.strokeRoundedFolder01, title: '缓存管理', subtitle: '按歌曲管理音频、封面、歌词与元信息', onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const CacheSettingsPage()))),
+      _entry(context, icon: HugeIcons.strokeRoundedPieChart03, title: '缓存管理', subtitle: '按歌曲管理音频、封面、歌词与元信息', onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const CacheSettingsPage()))),
     ]),
   );
 

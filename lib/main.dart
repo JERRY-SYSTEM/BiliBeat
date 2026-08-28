@@ -513,7 +513,7 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
             // Layer 1: Content Pages
             Column(
               children: [
-                // Top Tab Header Selector ("聆听" | "搜索") — sliding pill
+                // Top Tab Header Selector ("主页" | "搜索") — sliding pill
                 SafeArea(
                   bottom: false,
                   minimum: const EdgeInsets.only(top: 12),
@@ -523,7 +523,7 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
                       children: [
                         Expanded(
                           child: SegmentTabs(
-                            labels: const ['聆听', '搜索'],
+                            labels: const ['主页', '搜索'],
                             animation: _pageFraction,
                             onTap: _onTabTap,
                           ),
@@ -545,7 +545,7 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
                   ),
                 ),
 
-                // Swipeable PageView (聆听 & 搜索)
+                // Swipeable PageView (主页 & 搜索)
                 Expanded(
                   child: PageView(
                     controller: _pageController,

@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:hugeicons/hugeicons.dart';
 
 import '../models/lyric_line.dart';
 import '../models/track.dart';
@@ -478,7 +479,7 @@ class _NowPlayingSheetState extends State<NowPlayingSheet> {
                 ),
                 const SizedBox(width: 8),
                 IconButton(
-                  icon: const Icon(Icons.edit_note_rounded,
+                  icon: const HugeIcon(icon: HugeIcons.strokeRoundedEdit02,
                       color: AppColors.textSecondary, size: 24),
                   tooltip: '编辑',
                   onPressed: () => _openEditor(lyricsTab: _showLyrics),
@@ -528,7 +529,7 @@ class _NowPlayingSheetState extends State<NowPlayingSheet> {
     return SizedBox(
       width: 48,
       child: IconButton(
-        icon: Icon(Icons.queue_music_rounded,
+        icon: HugeIcon(icon: HugeIcons.strokeRoundedListMusic,
             color: enabled ? AppColors.textMuted : AppColors.textFaint,
             size: 25),
         tooltip: '播放列表',
@@ -584,8 +585,8 @@ class _NowPlayingSheetState extends State<NowPlayingSheet> {
         onPressed: task != null ? null : _startDownload,
         filled: false,
         progress: task?.fraction,
-        icon: const Icon(Icons.download_rounded,
-            color: AppColors.textPrimary, size: 34),
+        icon: HugeIcon(icon: HugeIcons.strokeRoundedDownload04,
+            color: context.palette.textPrimary, size: 34),
       );
     }
 
@@ -601,7 +602,7 @@ class _NowPlayingSheetState extends State<NowPlayingSheet> {
         child: Icon(
           playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
           key: ValueKey<bool>(playing),
-          color: AppColors.textPrimary,
+          color: context.palette.textPrimary,
           size: 40,
         ),
       ),
@@ -666,21 +667,18 @@ class _NowPlayingSheetState extends State<NowPlayingSheet> {
   }
 
   Widget _modeButton() {
-    final IconData icon = _isShuffle
-        ? Icons.shuffle_rounded
+    final icon = _isShuffle
+        ? HugeIcons.strokeRoundedShuffle
         : (_loopMode == LoopMode.one
-            ? Icons.repeat_one_rounded
-            : Icons.repeat_rounded);
+            ? HugeIcons.strokeRoundedRepeatOne01
+            : HugeIcons.strokeRoundedRepeat);
     final label = _isShuffle
         ? '随机播放'
         : (_loopMode == LoopMode.one ? '单曲循环' : '列表循环');
-    // Shuffle and repeat-one are both "not the default", so both light up.
-    final active = _isShuffle || _loopMode == LoopMode.one;
     return SizedBox(
       width: 48,
       child: IconButton(
-        icon: Icon(icon,
-            color: active ? context.palette.accent : context.palette.textMuted, size: 24),
+        icon: HugeIcon(icon: icon, color: context.palette.textMuted, size: 24),
         tooltip: label,
         onPressed: () {
           Haptics.medium();
