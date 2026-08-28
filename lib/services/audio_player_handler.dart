@@ -114,6 +114,15 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
   Future<void> persistPlaybackState() => _persistState();
   LoopMode get loopMode => _loopMode;
   bool get isShuffle => _isShuffle;
+  bool get canSkipPrevious {
+    if (_playlist.length < 2 || _currentIndex < 0) return false;
+    return true;
+  }
+
+  bool get canSkipNext {
+    if (_playlist.length < 2 || _currentIndex < 0) return false;
+    return true;
+  }
 
   BiliBeatAudioHandler() {
     _initAudioPlayerListeners();
@@ -167,12 +176,15 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
       if (_currentIndex < 0 || _currentIndex >= _playlist.length) _currentIndex = 0;
       _queueManager.syncAfterQueueChange(queue: _playlist, currentIndex: _currentIndex);
       _resumePosition = Duration(milliseconds: (map['positionMs'] as num?)?.toInt() ?? 0);
-      _restoredWasPlaying = map['wasPlaying'] == true;
+      // Restore the queue without starting native playback during bootstrap.
+      // The old auto-resume path could race Flutter's first frame and leave
+      // the app behind a white loading surface. The saved position is kept;
+      // explicit play will resume from it.
+      _restoredWasPlaying = false;
       _emitQueue();
       _currentTrackController.add(currentTrack);
       _duration = Duration(seconds: currentTrack?.duration ?? 0);
       if (currentTrack != null) _updateMediaItem(currentTrack!);
-      if (_restoredWasPlaying) await _startCurrent(autoplay: true, initialPosition: _resumePosition);
     } catch (e) {
       debugPrint('Playback queue restore failed: $e');
     }
@@ -417,7 +429,12 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
   Future<void> play() async {
     // Cold restore: we have a logical track but an empty native queue.
     if (_queueSource.length == 0 && currentTrack != null) {
-      await _startCurrent(autoplay: true);
+      final resumePosition = _resumePosition;
+      _resumePosition = Duration.zero;
+      await _startCurrent(
+        autoplay: true,
+        initialPosition: resumePosition,
+      );
       return;
     }
     // Nothing loaded at all: playing would be a lie the UI then renders as
@@ -470,15 +487,13 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
       currentIndex: _currentIndex,
       shuffle: _isShuffle,
     );
-    if (next != null && (next != 0 || _playlist.length == 1 || _isShuffle)) {
+    if (next != null) {
       // Use the same logical transition for both a prefetched and a not-yet-
       // queued track.  Calling seekToNext() directly leaves [_currentIndex]
       // stale until currentIndexStream happens to arrive; that event can be
       // filtered while a queue rebuild is settling, leaving the audio and UI
       // on different tracks.
       await _playAtIndex(next);
-    } else if (_loopMode != LoopMode.off) {
-      await _playAtIndex(0);
     } else {
       await seek(Duration.zero);
       await pause();
@@ -502,13 +517,11 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
     );
     final canMovePrevious = _isShuffle
         ? prev != null && (prev != _currentIndex || _playlist.length == 1)
-        : _currentIndex > 0;
+        : prev != null;
     if (prev != null && canMovePrevious) {
       await _playAtIndex(prev);
-    } else if (_loopMode != LoopMode.off) {
-      await _playAtIndex(_playlist.length - 1);
     } else {
-      await seek(Duration.zero);
+      await _playAtIndex(_playlist.length - 1);
     }
   }
 
@@ -769,13 +782,18 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
     if (_playlist.any((item) => item.id == track.id)) {
       final oldIndex = _playlist.indexWhere((item) => item.id == track.id);
       if (oldIndex == _currentIndex + 1) return;
+      if (oldIndex == _currentIndex) return;
       _playlist.removeAt(oldIndex);
       _naturalOrder.removeWhere((item) => item.id == track.id);
+      if (oldIndex < _currentIndex) _currentIndex--;
     }
     final path = await AudioDownloadService.ensureDownloaded(track);
     final insertIndex = (_currentIndex + 1).clamp(0, _playlist.length).toInt();
     _playlist.insert(insertIndex, track);
-    _naturalOrder.insert(insertIndex.clamp(0, _naturalOrder.length).toInt(), track);
+    _naturalOrder.insert(
+      insertIndex.clamp(0, _naturalOrder.length).toInt(),
+      track,
+    );
     _queueManager.syncAfterQueueChange(queue: _playlist, currentIndex: _currentIndex);
     _queueManager.prioritizeNext(
       queue: _playlist,
