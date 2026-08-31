@@ -68,8 +68,6 @@ class _NowPlayingSheetState extends State<NowPlayingSheet> {
   bool _isFavorite = false;
   bool _isDownloaded = false;
   DownloadTask? _downloadTask;
-  bool _showEditor = false;
-  bool _editorLyricsTab = false;
   VoidCallback? _editorRelease;
 
   bool get _isActive => widget.handler.currentTrack?.id == _displayTrack.id;
@@ -236,28 +234,52 @@ class _NowPlayingSheetState extends State<NowPlayingSheet> {
     if (nowFav && !_isDownloaded) _startDownload();
   }
 
-  void _openEditor({bool lyricsTab = false}) {
+  Future<void> _openEditor() async {
+    Haptics.selection();
     _editorRelease?.call();
     _editorRelease = widget.handler.holdAutoAdvance();
-    setState(() {
-      _showEditor = true;
-      _editorLyricsTab = lyricsTab;
-    });
-  }
-
-  void _closeEditor({int? page}) {
-    final targetPage = page ?? _currentPage;
-    _editorRelease?.call();
-    _editorRelease = null;
-    setState(() {
-      _showEditor = false;
-      _currentPage = targetPage;
-    });
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted && _pageController.hasClients) {
-        _pageController.jumpToPage(targetPage);
-      }
-    });
+    try {
+      await showModalBottomSheet<void>(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor: context.palette.backgroundElevated,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        builder: (sheetContext) => Padding(
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.viewInsetsOf(sheetContext).bottom,
+          ),
+          child: SafeArea(
+            top: false,
+            child: FractionallySizedBox(
+              heightFactor: 0.7,
+              child: LyricEditorDialog(
+                songTitle: _displayTrack.title,
+                rawTitle: _displayTrack.rawTitle,
+                artistName: _displayTrack.uploader,
+                coverUrl: _displayTrack.coverUrl,
+                onUpdateMetadata: (newTitle, newArtist, newCoverUrl) async {
+                  final updated = _displayTrack.copyWith(
+                    title: newTitle,
+                    uploader: newArtist,
+                    coverUrl: newCoverUrl,
+                  );
+                  if (mounted) setState(() => _displayTrack = updated);
+                  await DatabaseService.updateTrackMetadata(updated);
+                  if (!mounted) return;
+                  widget.handler.updateCurrentTrackMetadata(updated);
+                  Navigator.of(sheetContext).pop();
+                },
+              ),
+            ),
+          ),
+        ),
+      );
+    } finally {
+      _editorRelease?.call();
+      _editorRelease = null;
+    }
   }
 
   @override
@@ -267,143 +289,70 @@ class _NowPlayingSheetState extends State<NowPlayingSheet> {
       // below — rather than a flat black page. The route morph paints its own
       // opaque surface underneath, so this stays honest during the transition.
       backgroundColor: context.palette.background,
-      body: PopScope(
-        canPop: !_showEditor,
-        onPopInvokedWithResult: (didPop, result) {
-          if (didPop) return;
-          if (_showEditor) {
-            Haptics.selection();
-            _closeEditor();
-          }
-        },
-        child: Stack(
-          children: [
-            Positioned.fill(
-              child: AmbientBackground(coverUrl: _displayTrack.coverUrl),
-            ),
-            GestureDetector(
-              // Swipe down anywhere on the chrome to dismiss, like the system sheets.
-              onVerticalDragEnd: (details) {
-                if ((details.primaryVelocity ?? 0) > 320) {
-                  Haptics.selection();
-                  if (_showEditor) {
-                    _closeEditor();
-                  } else {
-                    Navigator.of(context).maybePop();
-                  }
-                }
-              },
-        child: SafeArea(
-          minimum: const EdgeInsets.only(top: 16),
-          child: Column(
-            children: [
-              Expanded(
-                child: AnimatedSwitcher(
-                  duration: AppMotion.base,
-                  switchInCurve: AppMotion.standard,
-                  switchOutCurve: AppMotion.standardReverse,
-                  transitionBuilder: (child, animation) {
-                    // Editor slides up from below; player content slides
-                    // down when editor appears and back up when it leaves.
-                    final isEditor = child.key == const ValueKey('editor');
-                    final offset = isEditor
-                        ? Tween<Offset>(begin: const Offset(0, 0.15), end: Offset.zero)
-                        : Tween<Offset>(begin: const Offset(0, -0.08), end: Offset.zero);
-                    return SlideTransition(
-                      position: offset.animate(animation),
-                      child: FadeTransition(opacity: animation, child: child),
-                    );
-                  },
-                  child: _showEditor
-                      ? KeyedSubtree(
-                          key: const ValueKey('editor'),
-                          child: LyricEditorDialog(
-                            songTitle: _displayTrack.title,
-                            rawTitle: _displayTrack.rawTitle,
-                            artistName: _displayTrack.uploader,
-                            coverUrl: _displayTrack.coverUrl,
-                            positionNotifier:
-                                _isActive ? widget.positionNotifier : null,
-                            initialTabIndex: _editorLyricsTab ? 1 : 0,
-                            currentLines:
-                                _isActive ? widget.lyricsNotifier.value : const [],
-                            currentTrackId: _isActive ? _displayTrack.id : null,
-                            onClose: _closeEditor,
-                            onApplyLyrics: (result) async {
-                              if (_isActive) {
-                                widget.lyricsNotifier.value = result.lines;
-                              }
-                              await DatabaseService.cacheLyrics(
-                                  _displayTrack.id, result);
-                              if (!mounted) return;
-                              _closeEditor(page: 2);
+      body: Stack(
+        children: [
+          Positioned.fill(
+            child: AmbientBackground(coverUrl: _displayTrack.coverUrl),
+          ),
+          GestureDetector(
+            // Swipe down anywhere on the chrome to dismiss, like the system sheets.
+            onVerticalDragEnd: (details) {
+              if ((details.primaryVelocity ?? 0) > 320) {
+                Haptics.selection();
+                Navigator.of(context).maybePop();
+              }
+            },
+            child: SafeArea(
+              minimum: const EdgeInsets.only(top: 16),
+              child: Column(
+                children: [
+                  Expanded(
+                    child: Column(
+                      children: [
+                        _topBar(),
+                        Expanded(
+                          child: PageView(
+                            key: const Key('playerPageView'),
+                            controller: _pageController,
+                            onPageChanged: (page) {
+                              Haptics.selection();
+                              setState(() => _currentPage = page);
                             },
-                            onUpdateMetadata:
-                                (newTitle, newArtist, newCoverUrl) async {
-                              final updated = _displayTrack.copyWith(
-                                title: newTitle,
-                                uploader: newArtist,
-                                coverUrl: newCoverUrl,
-                              );
-                              setState(() => _displayTrack = updated);
-                              await DatabaseService.updateTrackMetadata(updated);
-                              if (!mounted) return;
-                              widget.handler.updateCurrentTrackMetadata(updated);
-                              _closeEditor();
-                            },
-                          ),
-                        )
-                      : KeyedSubtree(
-                          key: const ValueKey('player'),
-                          child: Column(
                             children: [
-                              _topBar(),
-                              Expanded(
-                                child: PageView(
-                                  key: const Key('playerPageView'),
-                                  controller: _pageController,
-                                  onPageChanged: (page) {
-                                    Haptics.selection();
-                                    setState(() => _currentPage = page);
-                                  },
-                                  children: [
-                                    Padding(
-                                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-                                      child: _metadataPage(),
+                              Padding(
+                                padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+                                child: _metadataPage(),
+                              ),
+                              Column(
+                                children: [
+                                  Expanded(
+                                    child: Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 24, vertical: 8),
+                                      child: _albumArt(),
                                     ),
-                                    Column(
-                                      children: [
-                                        Expanded(
-                                          child: Padding(
-                                            padding: const EdgeInsets.symmetric(
-                                                horizontal: 24, vertical: 8),
-                                            child: _albumArt(),
-                                          ),
-                                        ),
-                                        _bottomPanel(),
-                                      ],
-                                    ),
-                                    Padding(
-                                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-                                      child: _lyricsPage(),
-                                    ),
-                                  ],
-                                ),
+                                  ),
+                                  _bottomPanel(),
+                                ],
+                              ),
+                              Padding(
+                                padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+                                child: _lyricsPage(),
                               ),
                             ],
                           ),
                         ),
-                ),
+                      ],
+                    ),
+                  ),
+                ],
               ),
-            ],
+            ),
           ),
-        ),
+        ],
       ),
-    ],
-  ),
-),
-);
-}
+    );
+  }
 
   Widget _topBar() {
     return SizedBox(
@@ -480,15 +429,15 @@ class _NowPlayingSheetState extends State<NowPlayingSheet> {
 
   Widget _metadataPage() {
     final track = _displayTrack;
-    final stats = <({IconData icon, String label, int? value})>[
-      (icon: Icons.play_circle_outline_rounded, label: '播放', value: track.playCount),
-      (icon: Icons.subtitles_outlined, label: '弹幕', value: track.danmakuCount),
-      (icon: Icons.thumb_up_alt_outlined, label: '点赞', value: track.likeCount),
-      (icon: Icons.monetization_on_outlined, label: '投币', value: track.coinCount),
-      (icon: Icons.star_border_rounded, label: '收藏', value: track.favoriteCount),
-      (icon: Icons.reply_all_rounded, label: '分享', value: track.shareCount),
-      (icon: Icons.chat_bubble_outline_rounded, label: '评论', value: track.replyCount),
-      (icon: Icons.timelapse_rounded, label: '时长', value: null),
+    final stats = <({dynamic icon, String label, int? value})>[
+      (icon: HugeIcons.strokeRoundedPlayCircle02, label: '播放', value: track.playCount),
+      (icon: HugeIcons.strokeRoundedSubtitle, label: '弹幕', value: track.danmakuCount),
+      (icon: HugeIcons.strokeRoundedThumbsUp, label: '点赞', value: track.likeCount),
+      (icon: HugeIcons.strokeRoundedDollarCircle, label: '投币', value: track.coinCount),
+      (icon: HugeIcons.strokeRoundedStar, label: '收藏', value: track.favoriteCount),
+      (icon: HugeIcons.strokeRoundedShare01, label: '分享', value: track.shareCount),
+      (icon: HugeIcons.strokeRoundedComment01, label: '评论', value: track.replyCount),
+      (icon: HugeIcons.strokeRoundedComingSoon02, label: '时长', value: null),
     ];
     return ListView(
       key: const Key('playerMetadataPage'),
@@ -600,7 +549,7 @@ class _NowPlayingSheetState extends State<NowPlayingSheet> {
     );
   }
 
-  Widget _statCard(IconData icon, String label, String value) => Container(
+  Widget _statCard(dynamic icon, String label, String value) => Container(
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
           color: context.palette.backgroundElevated.withValues(alpha: 0.78),
@@ -616,7 +565,14 @@ class _NowPlayingSheetState extends State<NowPlayingSheet> {
                 color: context.palette.accent12,
                 borderRadius: BorderRadius.circular(13),
               ),
-              child: Icon(icon, color: context.palette.accent, size: 20),
+              child: Transform.scale(
+                scale: 0.6,
+                child: HugeIcon(
+                  icon: icon,
+                  color: context.palette.accent,
+                  size: 24,
+                ),
+              ),
             ),
             const SizedBox(width: 10),
             Expanded(
@@ -678,7 +634,7 @@ class _NowPlayingSheetState extends State<NowPlayingSheet> {
                     tooltip: '手动匹配歌词',
                     color: context.palette.accent,
                     onPressed: _openLyricSearch,
-                    icon: const Icon(Icons.search_rounded),
+                    icon: const HugeIcon(icon: HugeIcons.strokeRoundedSearchList02),
                   ),
                   if (hasTranslation) ...[
                     const SizedBox(width: 20),
@@ -690,7 +646,7 @@ class _NowPlayingSheetState extends State<NowPlayingSheet> {
                       onPressed: () => setState(
                         () => _showTranslation = !_showTranslation,
                       ),
-                      icon: const Icon(Icons.translate_rounded),
+                      icon: const HugeIcon(icon: HugeIcons.strokeRoundedTranslate),
                     ),
                   ],
                 ],
@@ -773,8 +729,7 @@ class _NowPlayingSheetState extends State<NowPlayingSheet> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (!_showEditor) ...[
-            Row(
+          Row(
               children: [
                 Expanded(
                   child: Column(
@@ -804,8 +759,7 @@ class _NowPlayingSheetState extends State<NowPlayingSheet> {
                 _favoriteButton(),
               ],
             ),
-            const SizedBox(height: 10),
-          ],
+          const SizedBox(height: 10),
           _seekBar(),
           const SizedBox(height: 4),
           _transportControls(),

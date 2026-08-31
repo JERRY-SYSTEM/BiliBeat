@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'package:hugeicons/hugeicons.dart';
 import '../models/lyric_line.dart';
 import '../services/lyrics_engine.dart';
 import '../theme/app_theme.dart';
@@ -124,10 +125,7 @@ class _LyricSearchSheetState extends State<_LyricSearchSheet> {
           height: 440,
           child: Column(
             children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: TextField(
+              TextField(
                       key: const Key('manualLyricSearchField'),
                       controller: _controller,
                       enabled: _loadingId == null,
@@ -135,7 +133,15 @@ class _LyricSearchSheetState extends State<_LyricSearchSheet> {
                       onSubmitted: (_) => _search(),
                       decoration: InputDecoration(
                         hintText: '搜索歌词',
-                        prefixIcon: const Icon(Icons.search_rounded),
+                        prefixIcon: const SizedBox(
+                          width: 48,
+                          child: Center(
+                            child: HugeIcon(
+                              icon: HugeIcons.strokeRoundedMusic,
+                              size: 16,
+                            ),
+                          ),
+                        ),
                         filled: true,
                         fillColor: context.palette.surfaceDeep,
                         border: OutlineInputBorder(
@@ -144,12 +150,22 @@ class _LyricSearchSheetState extends State<_LyricSearchSheet> {
                         ),
                       ),
                     ),
-                  ),
-                  const SizedBox(width: 12),
-                  DropdownButton<LyricProvider>(
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Expanded(
+                    child: DropdownButtonFormField<LyricProvider>(
                     key: const Key('lyricProviderSelector'),
                     value: _provider,
-                    underline: const SizedBox.shrink(),
+                    decoration: InputDecoration(
+                      labelText: '音乐源',
+                      filled: true,
+                      fillColor: context.palette.surfaceDeep,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(14),
+                        borderSide: BorderSide.none,
+                      ),
+                    ),
                     items: LyricProvider.values
                         .map(
                           (provider) => DropdownMenuItem(
@@ -165,6 +181,14 @@ class _LyricSearchSheetState extends State<_LyricSearchSheet> {
                             setState(() => _provider = provider);
                             _search();
                           },
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  IconButton.filled(
+                    key: const Key('lyricSearchSubmitButton'),
+                    tooltip: '搜索',
+                    onPressed: _loadingId != null || _searching ? null : _search,
+                    icon: const HugeIcon(icon: HugeIcons.strokeRoundedSearch01),
                   ),
                 ],
               ),
