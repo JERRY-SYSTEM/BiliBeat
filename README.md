@@ -1,18 +1,27 @@
 # BiliBeat
 
-基于 Flutter 开发的哔哩哔哩音频播放器，支持同步 LRC 歌词与离线缓存。
+基于 Flutter 开发的哔哩哔哩音频播放器。
+
+## 功能
+
+- [x] 歌曲搜索和播放
+- [x] 账号登录与收藏夹同步
+- [x] 自建歌单
+- [x] 歌词搜索
+- [x] 多主题设置
+- [x] 缓存管理
+- [ ] etc...
 
 ## 下载与安装
 
-- **[最新版本](https://github.com/Aeacu2/BiliBeat/releases/latest)**
+- **[最新版本](https://github.com/JERRY-SYSTEM/BiliBeat/releases/latest)**
 
 ---
 
 ### Android 安装
 
 1. 在 Latest Release 页面下载 `bilibeat-x.x.x-arm64-v8a.apk` 安装包。
-2. 在 Android 设备上打开下载的 `.apk` 文件（需 Android 6.0 及以上版本）。
-3. 如系统提示，请在系统设置中允许"安装未知来源应用"以完成安装。
+2. 在 Android 设备安卓下载的 `.apk` 文件（需 Android 6.0 及以上版本，由于签名使用的是LSPatch默认签名，因此可能会误报为病毒）。
 
 ---
 
@@ -20,7 +29,12 @@
 
 BiliBeat 未上架 Apple App Store，发布构建以未签名归档包（`bilibeat-x.x.x-unsigned.ipa`）形式提供。iOS 安装前需使用个人开发者证书进行签名（需 iOS 13.0 及以上版本）。
 
-#### 方式一：通过 AltStore 安装（推荐）
+#### 方式一：通过 LiveContainer 安装（推荐）
+
+1. 按照 [视频教程](https://b23.tv/owg4oOo) 或 [文字教程](https://www.luvwan.com/7848.html) 安装LiveContainer。
+2. 在首页导入 `.ipa` 文件，启动。
+
+#### 方式二：通过 AltStore 安装
 
 AltStore 支持本地安装，并可通过 Wi-Fi 自动续签后台证书。
 
@@ -35,7 +49,7 @@ AltStore 支持本地安装，并可通过 Wi-Fi 自动续签后台证书。
    - 打开 AltStore，进入"我的 App"页面，点击 `+` 图标并选择已下载的 `.ipa` 文件。
    - *自动续签*：只要主机电脑与设备处于同一 Wi-Fi 网络且保持运行，AltServer 会自动续签 7 天有效期的证书。
 
-#### 方式二：通过 Sideloadly 安装
+#### 方式三：通过 Sideloadly 安装
 
 Sideloadly 是一款基于桌面端的直装工具，可通过 USB 直接安装已签名安装包。
 
@@ -63,6 +77,12 @@ apksigner verify --print-certs build/app/outputs/flutter-apk/app-release.apk
 ```
 
 ## 构建
+
+#### 方法一：Github Actions （推荐）
+
+运行 Release Build 可以直接构建产物并发布到Releases。
+
+#### 方法二：本地构建
 
 ```bash
 tool/build_release.sh          # Android（默认）
@@ -103,19 +123,12 @@ flutter test      # 单元测试与 widget 测试
 `test/fixtures/real_bilibili_titles.json`（540 条真实 B 站标题）。
 调整解析规则前请先补充或核对语料，避免依赖机器本地的临时文件。
 
-每次 push / PR 由 GitHub Actions（`.github/workflows/ci.yml`）自动执行
+（`.github/workflows/ci.yml`）改为手动执行
 `flutter analyze` 与 `flutter test`，Flutter 版本固定为 3.44.8，升级 SDK 时请同步更新。
 
-## 发布流程
+## 致谢
 
-```bash
-tool/release.sh patch "修复了某某问题"   # 或 minor / major，可跟多条说明
-```
-
-脚本会一次性完成：提升 `pubspec.yaml` 版本号与构建号、在 `CHANGELOG.md` 顶部插入条目、
-提交并打 `vX.Y.Z` 标签。它**不执行构建**——随后运行 `tool/build_release.sh all`，
-并将产物与对应的 `symbols/` 符号文件一同附加到 GitHub Release。
-脚本要求工作区干净，确保发布提交只包含版本变更本身。
+本项目许多功能参考 **[AprDeci/bili-music](https://github.com/AprDeci/bili-music)**
 
 ## 许可证
 
