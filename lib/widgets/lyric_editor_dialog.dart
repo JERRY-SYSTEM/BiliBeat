@@ -267,6 +267,7 @@ class _LyricEditorDialogState extends State<LyricEditorDialog>
       songTitle: res.songTitle,
       artistName: res.artistName,
       lines: adjustedLines,
+      isManual: res.isManual,
     ));
   }
 
@@ -419,23 +420,47 @@ class _LyricEditorDialogState extends State<LyricEditorDialog>
             ),
           ),
           const SizedBox(height: 12),
-          // Single stationary 确认 button fixed at the bottom of the dialog
-          SizedBox(
-            width: double.infinity,
-            height: 44,
-            child: ElevatedButton(
-              onPressed: _saveAll,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: context.palette.accent,
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12)),
+          // Stationary actions fixed at the bottom of the dialog.
+          Row(
+            children: [
+              Expanded(
+                child: SizedBox(
+                  height: 44,
+                  child: ElevatedButton(
+                    onPressed: _saveAll,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: context.palette.accent,
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12)),
+                    ),
+                    child: const Text('确认',
+                        style: TextStyle(
+                            color: AppColors.textPrimary,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 15)),
+                  ),
+                ),
               ),
-              child: const Text('确认',
-                  style: TextStyle(
-                      color: AppColors.textPrimary,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 15)),
-            ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: SizedBox(
+                  height: 44,
+                  child: TextButton(
+                    onPressed: _close,
+                    style: TextButton.styleFrom(
+                      foregroundColor: context.palette.textPrimary,
+                      backgroundColor: Colors.transparent,
+                      side: BorderSide.none,
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12)),
+                    ),
+                    child: const Text('取消',
+                        style: TextStyle(
+                            fontWeight: FontWeight.w600, fontSize: 15)),
+                  ),
+                ),
+              ),
+            ],
           ),
         ],
       ),
@@ -607,6 +632,10 @@ class _LyricEditorDialogState extends State<LyricEditorDialog>
     switch (raw) {
       case 'netease':
         return '网易云';
+      case 'kugou':
+        return '酷狗音乐';
+      case 'tencent':
+        return 'QQ音乐';
       case 'user':
         return '自定义';
       case '':
