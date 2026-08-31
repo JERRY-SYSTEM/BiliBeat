@@ -699,7 +699,11 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
       _positionController.add(Duration.zero);
       _onActiveTrackChanged(_playlist[index]);
       await _player.seek(Duration.zero, index: playerIndex);
-      if (!_isPlaying) await _player.play();
+      // Seeking to a child after the previous item completed does not always
+      // clear just_audio's completed/playWhenReady state. Explicit navigation
+      // must actively start the selected child, otherwise the UI advances
+      // while the old audio remains at (or restarts from) its end position.
+      await _player.play();
       // currentIndexStream is asynchronous and can be suppressed by a
       // just_audio implementation when seeking to an already queued item.
       // Reconcile after the seek as well, so the UI cannot remain on the
@@ -779,32 +783,72 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
       await playTrack(track);
       return;
     }
-    if (_playlist.any((item) => item.id == track.id)) {
-      final oldIndex = _playlist.indexWhere((item) => item.id == track.id);
-      if (oldIndex == _currentIndex + 1) return;
-      if (oldIndex == _currentIndex) return;
-      _playlist.removeAt(oldIndex);
-      _naturalOrder.removeWhere((item) => item.id == track.id);
-      if (oldIndex < _currentIndex) _currentIndex--;
+    final activeId = currentTrack?.id;
+    if (activeId == null) return;
+
+    // Adding a child can synchronously/asynchronously produce a native index
+    // event. During this transaction that event is not a logical navigation
+    // event: the current item must remain the audible item.
+    _isRebuilding = true;
+    try {
+      if (_playlist.any((item) => item.id == track.id)) {
+        final oldIndex = _playlist.indexWhere((item) => item.id == track.id);
+        if (oldIndex == _currentIndex + 1 || oldIndex == _currentIndex) return;
+        _playlist.removeAt(oldIndex);
+        _naturalOrder.removeWhere((item) => item.id == track.id);
+        if (oldIndex < _currentIndex) {
+          _currentIndex--;
+          // The native queue is a window into the logical playlist. If the
+          // removed item was before that window, its logical origin moves too;
+          // leaving the old base makes the next native index announce the
+          // wrong track (or replay the current track from zero).
+          if (oldIndex < _queueBaseIndex) _queueBaseIndex--;
+        }
+      }
+
+      final path = await AudioDownloadService.ensureDownloaded(track);
+      // The current track may have been changed by another user action while
+      // the download was running. Do not insert into a different queue.
+      if (_currentIndex < 0 ||
+          currentTrack?.id != activeId) {
+        return;
+      }
+
+      final insertIndex = (_currentIndex + 1).clamp(0, _playlist.length).toInt();
+      _playlist.insert(insertIndex, track);
+      _naturalOrder.insert(
+        insertIndex.clamp(0, _naturalOrder.length).toInt(),
+        track,
+      );
+      _queueManager.syncAfterQueueChange(
+        queue: _playlist,
+        currentIndex: _currentIndex,
+      );
+      _queueManager.prioritizeNext(
+        queue: _playlist,
+        currentIndex: _currentIndex,
+        trackId: track.id,
+        shuffle: _isShuffle,
+      );
+
+      final nativeCurrent = _player.currentIndex;
+      if (nativeCurrent != null && nativeCurrent < _queueSource.length) {
+        final child = _queueSource.children[nativeCurrent];
+        final tag = child is ja.IndexedAudioSource ? child.tag : null;
+        if (tag is Track && tag.id == activeId) {
+          await _queueSource.insert(
+            nativeCurrent + 1,
+            ja.AudioSource.file(path, tag: track),
+          );
+        }
+      }
+    } finally {
+      _isRebuilding = false;
     }
-    final path = await AudioDownloadService.ensureDownloaded(track);
-    final insertIndex = (_currentIndex + 1).clamp(0, _playlist.length).toInt();
-    _playlist.insert(insertIndex, track);
-    _naturalOrder.insert(
-      insertIndex.clamp(0, _naturalOrder.length).toInt(),
-      track,
-    );
-    _queueManager.syncAfterQueueChange(queue: _playlist, currentIndex: _currentIndex);
-    _queueManager.prioritizeNext(
-      queue: _playlist,
-      currentIndex: _currentIndex,
-      trackId: track.id,
-      shuffle: _isShuffle,
-    );
-    final nativeIndex = (_player.currentIndex ?? 0) + 1;
-    if (nativeIndex <= _queueSource.length) {
-      await _queueSource.insert(nativeIndex, ja.AudioSource.file(path, tag: track));
-    }
+
+    // Reconcile from the native child's tag, never from the index event that
+    // occurred while the insertion transaction was in flight.
+    _reconcileActiveTrack();
     _emitQueue();
     _schedulePersist(immediate: true);
   }
