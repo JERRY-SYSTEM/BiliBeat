@@ -81,6 +81,17 @@ class CacheInventory {
         }
       }
     }
-    return <CacheBucket>[...buckets.values.map((bucket) => CacheBucket(track: bucket.track, files: bucket.files, lyricsBytes: bucket.lyricsBytes, coverFiles: coverByTrack[bucket.track!.id] ?? const [])), if (otherFiles.isNotEmpty || otherBytes > 0) CacheBucket(track: null, files: otherFiles, extraBytes: otherBytes)];
+    final result = <CacheBucket>[
+      ...buckets.values.map((bucket) => CacheBucket(
+            track: bucket.track,
+            files: bucket.files,
+            lyricsBytes: bucket.lyricsBytes,
+            coverFiles: coverByTrack[bucket.track!.id] ?? const [],
+          )),
+      if (otherFiles.isNotEmpty || otherBytes > 0)
+        CacheBucket(track: null, files: otherFiles, extraBytes: otherBytes),
+    ];
+    result.sort((a, b) => a.isOther == b.isOther ? 0 : (a.isOther ? -1 : 1));
+    return result;
   }
 }

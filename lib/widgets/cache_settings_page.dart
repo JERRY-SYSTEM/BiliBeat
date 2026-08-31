@@ -57,13 +57,40 @@ class _CacheSettingsPageState extends State<CacheSettingsPage> {
     final palette = context.palette;
     return Scaffold(
       appBar: AppBar(title: const Text('缓存管理'), actions: [IconButton(onPressed: _loading ? null : _toggleAll, tooltip: '全选/取消全选', icon: const HugeIcon(icon: HugeIcons.strokeRoundedMore03))]),
-      body: _loading ? const Center(child: CircularProgressIndicator()) : ListView(padding: const EdgeInsets.fromLTRB(16, 8, 16, 24), children: [
-        Text('缓存总量 ${_formatBytes(_total)}', style: TextStyle(color: palette.textSecondary)),
-        const SizedBox(height: 12),
-        if (_buckets.isEmpty) Padding(padding: const EdgeInsets.all(32), child: Center(child: Text('暂无缓存', style: TextStyle(color: palette.textSecondary)))) else ..._buckets.map(_bucketTile),
-        const SizedBox(height: 16),
-        FilledButton.icon(onPressed: _busy || _selectedBytes == 0 ? null : _deleteSelected, icon: const HugeIcon(icon: HugeIcons.strokeRoundedDelete02), label: Text(_busy ? '删除中…' : '删除所选缓存 ${_formatBytes(_selectedBytes)}')),
-      ]),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : Column(
+              children: [
+                Expanded(
+                  child: ListView(
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                    children: [
+                      Text('缓存总量 ${_formatBytes(_total)}', style: TextStyle(color: palette.textSecondary)),
+                      const SizedBox(height: 12),
+                      if (_buckets.isEmpty)
+                        Padding(
+                          padding: const EdgeInsets.all(32),
+                          child: Center(child: Text('暂无缓存', style: TextStyle(color: palette.textSecondary))),
+                        )
+                      else
+                        ..._buckets.map(_bucketTile),
+                    ],
+                  ),
+                ),
+                SafeArea(
+                  top: false,
+                  minimum: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                  child: SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      onPressed: _busy || _selectedBytes == 0 ? null : _deleteSelected,
+                      icon: const HugeIcon(icon: HugeIcons.strokeRoundedDelete02),
+                      label: Text(_busy ? '删除中…' : '删除所选缓存 ${_formatBytes(_selectedBytes)}'),
+                    ),
+                  ),
+                ),
+              ],
+            ),
     );
   }
 
