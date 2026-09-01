@@ -61,6 +61,7 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
   String? _prefetchingId;
   Duration _resumePosition = Duration.zero;
   Timer? _persistTimer;
+  Future<void> _persistOperation = Future<void>.value();
   bool _userPaused = false;
   bool _restoredWasPlaying = false;
   bool _recovering = false;
@@ -204,20 +205,26 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
   }
 
   Future<void> _persistState() async {
-    try {
-      final map = {
-        'queue': _playlist.map((t) => t.toMap()).toList(),
-        'naturalOrder': _naturalOrder.map((t) => t.toMap()).toList(),
-        'currentIndex': _currentIndex,
-        'loopMode': _loopMode.name,
-        'shuffle': _isShuffle,
-        'positionMs': _player.position.inMilliseconds,
-        'wasPlaying': _player.playing && !_userPaused,
-      };
-      await File(await _playbackStatePath()).writeAsString(jsonEncode(map));
-    } catch (e) {
-      debugPrint('Playback queue persist failed: $e');
-    }
+    // Multiple state changes can request an immediate save in quick
+    // succession (for example when starting a playlist). Serialize writes so
+    // an older snapshot can never finish after the newer one.
+    _persistOperation = _persistOperation.then((_) async {
+      try {
+        final map = {
+          'queue': _playlist.map((t) => t.toMap()).toList(),
+          'naturalOrder': _naturalOrder.map((t) => t.toMap()).toList(),
+          'currentIndex': _currentIndex,
+          'loopMode': _loopMode.name,
+          'shuffle': _isShuffle,
+          'positionMs': _player.position.inMilliseconds,
+          'wasPlaying': _player.playing && !_userPaused,
+        };
+        await File(await _playbackStatePath()).writeAsString(jsonEncode(map));
+      } catch (e) {
+        debugPrint('Playback queue persist failed: $e');
+      }
+    });
+    return _persistOperation;
   }
 
   void _emitQueue() {
@@ -403,7 +410,6 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
         ..clear()
         ..addAll(newQueue);
       _emitQueue();
-      _schedulePersist(immediate: true);
     }
     if (!_playlist.any((t) => t.id == track.id)) {
       _playlist.insert(0, track);
@@ -505,10 +511,10 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
     if (_playlist.isEmpty) return;
 
     // Standard music UX: restart the current track once we're >3s in.
-    if (_player.position > const Duration(seconds: 3)) {
-      await seek(Duration.zero);
-      return;
-    }
+    ///if (_player.position > const Duration(seconds: 3)) {
+    ///  await seek(Duration.zero);
+    ///  return;
+    ///}
 
     final prev = _queueManager.previous(
       queue: _playlist,
