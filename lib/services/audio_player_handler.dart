@@ -65,6 +65,8 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
   bool _userPaused = false;
   bool _restoredWasPlaying = false;
   bool _recovering = false;
+  bool _completionPending = false;
+  bool _handlingCompletion = false;
   AudioSession? _audioSession;
 
   /// Number of open surfaces that have asked playback not to move on by itself
@@ -297,7 +299,7 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
       _broadcastState();
 
       if (state.processingState == ja.ProcessingState.completed) {
-        _handleQueueCompleted();
+        unawaited(_handleQueueCompleted());
       }
     });
 
@@ -322,6 +324,15 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
       // Guard against echoes from rebuilds / no-op changes.
       if (logical == _currentIndex) return;
       if (logical < 0 || logical >= _playlist.length) return;
+      // A delayed native index event can belong to the previous queue window.
+      // Never announce a logical track unless the queued item's tag agrees.
+      if (playerIndex >= 0 && playerIndex < _queueSource.length) {
+        final child = _queueSource.children[playerIndex];
+        if (child is ja.IndexedAudioSource && child.tag is Track) {
+          final tag = child.tag as Track;
+          if (tag.id != _playlist[logical].id) return;
+        }
+      }
       _currentIndex = logical;
       _onActiveTrackChanged(_playlist[logical]);
     });
@@ -366,7 +377,17 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
     if (queuedChild is! ja.IndexedAudioSource) return;
     final queuedTag = queuedChild.tag;
     if (queuedTag is! Track) return;
-    if (queuedTag.id != _playlist[logical].id) return;
+    if (queuedTag.id != _playlist[logical].id) {
+      // The native item is authoritative when the app was backgrounded or a
+      // queue mutation raced the index event. Find that item in the logical
+      // playlist and re-anchor the sliding-window base at the same time.
+      final found = _playlist.indexWhere((track) => track.id == queuedTag.id);
+      if (found < 0) return;
+      _currentIndex = found;
+      _queueBaseIndex = found - playerIndex;
+      _onActiveTrackChanged(_playlist[found]);
+      return;
+    }
     // [_currentIndex] is deliberately updated optimistically by manual
     // navigation so the controls feel immediate.  It can therefore already
     // equal `logical` while the native player is still on the old queue item.
@@ -375,6 +396,29 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
     if (_currentIndex == logical && currentTrack?.id == queuedTag.id) return;
     _currentIndex = logical;
     _onActiveTrackChanged(_playlist[logical]);
+  }
+
+  /// Re-aligns the Dart/UI state after the app returns from the background.
+  /// Native playback can advance while Flutter is throttled and the
+  /// currentIndexStream notification may arrive too late or be lost.
+  void syncOnResume() {
+    if (_isRebuilding) return;
+    final before = _currentIndex;
+    _reconcileActiveTrack();
+    // A completion notification can also be lost while Flutter is
+    // backgrounded. Re-run the same guarded transition if the native player
+    // still reports its terminal state.
+    if (_player.processingState == ja.ProcessingState.completed) {
+      unawaited(_handleQueueCompleted());
+    }
+    final track = currentTrack;
+    if (track == null) return;
+    if (_currentIndex == before) {
+      // Refresh the platform session even when the index did not change; its
+      // progress snapshot may be stale after a background transition.
+      _updateMediaItem(track);
+      _broadcastState();
+    }
   }
 
   /// Announce the newly active track to every observer: the UI stream, the
@@ -511,10 +555,10 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
     if (_playlist.isEmpty) return;
 
     // Standard music UX: restart the current track once we're >3s in.
-    if (_player.position > const Duration(seconds: 3)) {
-      await seek(Duration.zero);
-      return;
-    }
+    ///if (_player.position > const Duration(seconds: 3)) {
+    ///  await seek(Duration.zero);
+    ///  return;
+    ///}
 
     final prev = _queueManager.previous(
       queue: _playlist,
@@ -644,6 +688,7 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
 
   Future<void> clearQueue() async {
     ++_startToken;
+    _completionPending = false;
     _isRebuilding = true;
     try {
       await _player.stop();
@@ -687,6 +732,7 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
     } finally {
       _isRebuilding = false;
     }
+    _drainPendingCompletion();
     _emitQueue();
     _broadcastState();
     if (wasPlaying && _loopMode != LoopMode.one) unawaited(_prefetchNext());
@@ -710,6 +756,8 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
       // must actively start the selected child, otherwise the UI advances
       // while the old audio remains at (or restarts from) its end position.
       await _player.play();
+      _isPlaying = _player.playing;
+      _playerStateController.add(_isPlaying);
       // currentIndexStream is asynchronous and can be suppressed by a
       // just_audio implementation when seeking to an already queued item.
       // Reconcile after the seek as well, so the UI cannot remain on the
@@ -851,6 +899,7 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
     } finally {
       _isRebuilding = false;
     }
+    _drainPendingCompletion();
 
     // Reconcile from the native child's tag, never from the index event that
     // occurred while the insertion transaction was in flight.
@@ -900,6 +949,10 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
       debugPrint('playTrack download failed: $e');
       if (token == _startToken) {
         _isRebuilding = false;
+        // This failure path chooses the fallback track itself below. Do not
+        // let a completion event queued during the download start a second
+        // transition in parallel.
+        _completionPending = false;
         final next = _queueManager.nextAvailable(
           queue: _playlist,
           failedIndex: _currentIndex,
@@ -994,6 +1047,9 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
   /// queue's last child. This keeps the window gapless-ready without ever
   /// streaming bytes through Dart.
   Future<void> _prefetchNext() async {
+    // Do not let an old download append to a queue while another operation is
+    // replacing or re-anchoring that queue.
+    if (_isRebuilding) return;
     if (_loopMode == LoopMode.one || autoAdvanceHeld) return;
     if (_playlist.isEmpty || _currentIndex < 0) return;
 
@@ -1017,6 +1073,7 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
       // Re-validate after the download: the user may have navigated, or the
       // playlist may have been replaced while we were fetching — the index
       // guard alone can pass for a *new* window and append a stale track.
+      if (_isRebuilding) return;
       final succIndex = _currentIndex + 1;
       if (_currentIndex == _queueBaseIndex + _queueSource.length - 1 &&
           succIndex < _playlist.length &&
@@ -1032,34 +1089,64 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
 
   /// The native queue ran out. Advance the logical playlist (the prefetch of
   /// the following track may simply not have finished in time).
-  void _handleQueueCompleted() {
-    if (_isRebuilding || _playlist.isEmpty) return;
+  void _drainPendingCompletion() {
+    if (!_completionPending || _isRebuilding) return;
+    _completionPending = false;
+    unawaited(_handleQueueCompleted());
+  }
 
-    // The user is on the lyrics / info surface: end here rather than pulling
-    // the ground out from under them by loading another track.
-    if (autoAdvanceHeld) {
+  /// Handles the native player's terminal state exactly once.
+  ///
+  /// Completion can be reported while a new source is being installed. The
+  /// old implementation discarded that event, leaving the player in
+  /// `completed` while the Dart-side controls still represented the old
+  /// playing track. Keep the event pending until the rebuild settles, and
+  /// await the actual transition so a second completion notification cannot
+  /// race the first one.
+  Future<void> _handleQueueCompleted() async {
+    if (_isRebuilding) {
+      _completionPending = true;
+      return;
+    }
+    if (_handlingCompletion || _playlist.isEmpty) return;
+    // A pending completion may have been released after the source was
+    // replaced; in that case the new source is already healthy.
+    if (_player.processingState != ja.ProcessingState.completed) return;
+
+    _handlingCompletion = true;
+    try {
+      // The index event may have been suppressed during a queue mutation.
+      // Reconcile before choosing the next logical item.
+      _reconcileActiveTrack();
+
+      // The user is on the lyrics / info surface: end here rather than
+      // pulling the ground out from under them by loading another track.
+      if (autoAdvanceHeld) {
+        _isPlaying = false;
+        _playerStateController.add(false);
+        _broadcastState();
+        return;
+      }
+
+      final next = _queueManager.next(
+        queue: _playlist,
+        currentIndex: _currentIndex,
+        shuffle: _isShuffle,
+      );
+      if (next != null && (next != 0 || _isShuffle || _playlist.length == 1)) {
+        await _playAtIndex(next);
+        return;
+      }
+      if (_loopMode == LoopMode.all) {
+        await _playAtIndex(0);
+        return;
+      }
       _isPlaying = false;
       _playerStateController.add(false);
       _broadcastState();
-      return;
+    } finally {
+      _handlingCompletion = false;
     }
-
-    final next = _queueManager.next(
-      queue: _playlist,
-      currentIndex: _currentIndex,
-      shuffle: _isShuffle,
-    );
-    if (next != null && (next != 0 || _isShuffle || _playlist.length == 1)) {
-      _playAtIndex(next);
-      return;
-    }
-    if (_loopMode == LoopMode.all) {
-      _playAtIndex(0);
-      return;
-    }
-    _isPlaying = false;
-    _playerStateController.add(false);
-    _broadcastState();
   }
 
   void _broadcastState({

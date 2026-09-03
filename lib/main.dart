@@ -219,6 +219,18 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
     if (state == AppLifecycleState.inactive ||
         state == AppLifecycleState.paused) {
       unawaited(_audioHandler.persistPlaybackState());
+    } else if (state == AppLifecycleState.resumed) {
+      // The native player can continue and advance while Flutter is
+      // backgrounded, even when the currentIndexStream notification is
+      // delayed or dropped. Re-anchor the app-side state before the UI is
+      // shown again.
+      _audioHandler.syncOnResume();
+      final track = _audioHandler.currentTrack;
+      if (track != null && !identical(_currentTrack.value, track)) {
+        _currentTrack.value = track;
+      }
+      _positionNotifier.value = _audioHandler.position;
+      _isPlaying.value = _audioHandler.isPlaying;
     }
   }
 
