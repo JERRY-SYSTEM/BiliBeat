@@ -6,20 +6,19 @@ import 'package:path_provider/path_provider.dart';
 
 import '../models/track.dart';
 import '../widgets/cached_cover_image.dart';
-import 'audio_download_service.dart';
 
 /// A user-facing cache bucket. A bucket contains every cache artifact that can
 /// be confidently attributed to one song; everything else is [other].
 class CacheBucket {
-  const CacheBucket({required this.track, required this.files, this.lyricsBytes = 0, this.coverFiles = const [], this.extraBytes = 0});
+  const CacheBucket({required this.track, required this.files, this.lyricsBytes = 0, this.coverFiles = const [], this.extraBytes = 0, this.fileBytes = 0});
   final Track? track;
   final List<File> files;
   final int lyricsBytes;
   final List<File> coverFiles;
   final int extraBytes;
+  final int fileBytes;
   bool get isOther => track == null;
-  int get bytes => files.fold(0, (sum, file) => sum + _length(file)) + lyricsBytes + extraBytes + coverFiles.fold(0, (sum, file) => sum + _length(file));
-  static int _length(File file) { try { return file.lengthSync(); } catch (_) { return 0; } }
+  int get bytes => fileBytes + lyricsBytes + extraBytes;
 }
 
 class CacheInventory {
@@ -60,20 +59,20 @@ class CacheInventory {
       } catch (_) { otherFiles.add(lyricsFile); }
     }
     final coversDir = Directory('${support.path}/bilibeat_covers');
+    final coverOwners = <String, Track>{};
+    for (final track in tracks) {
+      if (track.coverUrl.isEmpty || CachedCoverImage.isLocalPath(track.coverUrl)) continue;
+      for (final size in const [40, 44, 48, 54, 64, 72, 80, 120, 140, 160, 240, 320]) {
+        final key = md5.convert(utf8.encode(CachedCoverImage.sizedUrl(track.coverUrl, size, size))).toString();
+        coverOwners.putIfAbsent('img_$key.img', () => track);
+      }
+    }
     if (await coversDir.exists()) {
       for (final entity in await coversDir.list().toList()) {
         if (entity is! File) continue;
-        Track? owner;
-        for (final track in tracks) {
-          if (track.coverUrl.isEmpty || CachedCoverImage.isLocalPath(track.coverUrl)) continue;
-          // Cover filenames are dimension-specific. Without a persisted
-          // ownership map, historical files remain safely in “其它”.
-          for (final size in const [40, 44, 48, 54, 64, 72, 80, 120, 140, 160, 240, 320]) {
-            final key = md5.convert(utf8.encode(CachedCoverImage.sizedUrl(track.coverUrl, size, size))).toString();
-            if (entity.path.contains(key)) { owner = track; break; }
-          }
-          if (owner != null) break;
-        }
+        // In-progress downloads must never be offered for cache deletion.
+        if (entity.path.endsWith('.part')) continue;
+        final owner = coverOwners[entity.uri.pathSegments.last];
         if (owner == null) {
           otherFiles.add(entity);
         } else {
@@ -92,6 +91,25 @@ class CacheInventory {
         CacheBucket(track: null, files: otherFiles, extraBytes: otherBytes),
     ];
     result.sort((a, b) => a.isOther == b.isOther ? 0 : (a.isOther ? -1 : 1));
-    return result;
+    final snapshots = <CacheBucket>[];
+    for (final bucket in result) {
+      var fileBytes = 0;
+      for (final file in [...bucket.files, ...bucket.coverFiles]) {
+        try {
+          fileBytes += await file.length();
+        } on FileSystemException {
+          // A download or deletion may race with the inventory scan.
+        }
+      }
+      snapshots.add(CacheBucket(
+        track: bucket.track,
+        files: bucket.files,
+        coverFiles: bucket.coverFiles,
+        lyricsBytes: bucket.lyricsBytes,
+        extraBytes: bucket.extraBytes,
+        fileBytes: fileBytes,
+      ));
+    }
+    return snapshots;
   }
 }

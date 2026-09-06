@@ -121,11 +121,18 @@ class _AmbientBackgroundState extends State<AmbientBackground> {
       targetWidth: 24,
       targetHeight: 24,
     );
-    final frame = await codec.getNextFrame();
-    final image = frame.image;
-    final byteData = await image.toByteData(); // rawRgba
-    image.dispose();
-    codec.dispose();
+    final ByteData? byteData;
+    try {
+      final frame = await codec.getNextFrame();
+      final image = frame.image;
+      try {
+        byteData = await image.toByteData(); // rawRgba
+      } finally {
+        image.dispose();
+      }
+    } finally {
+      codec.dispose();
+    }
     if (byteData == null) return _fallback;
 
     double r = 0, g = 0, b = 0, wSum = 0;

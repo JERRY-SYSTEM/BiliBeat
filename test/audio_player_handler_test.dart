@@ -20,6 +20,7 @@ const second = Track(
 /// The fake does not attach sources to a platform, so queue edits stay local.
 class FakeAudioPlayer extends Fake implements ja.AudioPlayer {
   final states = StreamController<ja.PlayerState>.broadcast();
+  final indices = StreamController<int?>.broadcast();
   Completer<void>? playback;
   ja.AudioSource? source;
 
@@ -28,7 +29,31 @@ class FakeAudioPlayer extends Fake implements ja.AudioPlayer {
   @override
   ja.ProcessingState processingState = ja.ProcessingState.idle;
   @override
-  int? currentIndex;
+  int? get currentIndex {
+    // Native players keep the audible item when sources before it are removed.
+    // Model that behavior even though this fake never attaches a platform.
+    final queue = source;
+    // ignore: deprecated_member_use
+    if (queue is ja.ConcatenatingAudioSource && _activeTag != null) {
+      final index = queue.children.indexWhere((child) =>
+          child is ja.IndexedAudioSource && child.tag == _activeTag);
+      if (index >= 0) return index;
+    }
+    return _index;
+  }
+  int? _index;
+  Object? _activeTag;
+  set currentIndex(int? value) {
+    _index = value;
+    final queue = source;
+    // ignore: deprecated_member_use
+    if (queue is ja.ConcatenatingAudioSource && value != null &&
+        value >= 0 && value < queue.length) {
+      _activeTag = (queue.children[value] as ja.IndexedAudioSource).tag;
+    } else {
+      _activeTag = null;
+    }
+  }
   @override
   Duration position = Duration.zero;
   @override
@@ -42,7 +67,12 @@ class FakeAudioPlayer extends Fake implements ja.AudioPlayer {
   @override
   Stream<Duration?> get durationStream => const Stream.empty();
   @override
-  Stream<int?> get currentIndexStream => const Stream.empty();
+  Stream<int?> get currentIndexStream => indices.stream;
+
+  void advance() {
+    currentIndex = currentIndex! + 1;
+    indices.add(currentIndex);
+  }
   @override
   Stream<ja.PlayerException> get errorStream => const Stream.empty();
 
@@ -107,6 +137,7 @@ class FakeAudioPlayer extends Fake implements ja.AudioPlayer {
   Future<void> dispose() async {
     finishPlayFuture();
     await states.close();
+    await indices.close();
   }
 }
 
@@ -151,6 +182,47 @@ void main() {
     // ignore: deprecated_member_use
     expect((player.source as ja.ConcatenatingAudioSource).length, 2);
     expect(handler.isPlaying, isTrue);
+  });
+
+  test('long gapless playback bounds native sources and preserves navigation', () async {
+    final tracks = List.generate(250, (i) => Track(
+      id: 'song$i', bvid: 'song$i', cid: i, title: 'Song $i',
+      rawTitle: 'Song $i', uploader: 'Artist', coverUrl: '', duration: 10,
+    ));
+    await handler.playTrack(tracks.first, newQueue: tracks);
+    await flushEvents();
+    for (var i = 1; i < tracks.length; i++) {
+      player.advance();
+      await flushEvents();
+      await flushEvents();
+      expect(handler.currentTrack?.id, tracks[i].id);
+      expect(handler.currentQueueIndex, i);
+      // ignore: deprecated_member_use
+      final queue = player.source as ja.ConcatenatingAudioSource;
+      expect(queue.length, lessThanOrEqualTo(3));
+      expect(player.playback!.isCompleted, isFalse);
+    }
+    expect(handler.playbackQueue.length, tracks.length);
+    await handler.skipToPrevious();
+    await flushEvents();
+    expect(handler.currentTrack?.id, tracks[248].id);
+    // Delete a logical item which was already released from the native queue.
+    await handler.removeQueueItemAt(0);
+    await handler.skipToNext();
+    await flushEvents();
+    expect(handler.currentTrack?.id, tracks.last.id);
+    await handler.skipToQueueItem(0);
+    await flushEvents();
+    expect(handler.currentTrack?.id, tracks[1].id);
+  });
+
+  test('media artwork uses thumbnails and encodes local file paths', () async {
+    await handler.playTrack(first.copyWith(coverUrl: 'https://i0.hdslb.com/cover.jpg'));
+    expect(handler.mediaItem.value?.artUri.toString(),
+        'https://i0.hdslb.com/cover.jpg@512w_512h_1e_1c.webp');
+    await handler.playTrack(first.copyWith(coverUrl: '/covers/my cover.jpg'));
+    expect(handler.mediaItem.value?.artUri?.scheme, 'file');
+    expect(handler.mediaItem.value?.artUri?.path, '/covers/my cover.jpg');
   });
 
   test('EOF advances without prefetch in shuffle mode', () async {

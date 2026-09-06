@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -52,7 +53,7 @@ class CachedCoverImage extends StatefulWidget {
       url.startsWith('/') || url.startsWith('file://');
 
   static String localPathOf(String url) =>
-      url.startsWith('file://') ? url.substring('file://'.length) : url;
+      url.startsWith('file://') ? Uri.parse(url).toFilePath() : url;
 
   @override
   State<CachedCoverImage> createState() => _CachedCoverImageState();
@@ -60,7 +61,8 @@ class CachedCoverImage extends StatefulWidget {
 
 enum _CoverStatus { loading, ready, failed }
 
-class _CachedCoverImageState extends State<CachedCoverImage> {
+class _CachedCoverImageState extends State<CachedCoverImage>
+    with WidgetsBindingObserver {
   static final HttpClient _client =
       biliHttpClient(connectionTimeout: const Duration(seconds: 15),
           maxConnectionsPerHost: 8);
@@ -77,11 +79,27 @@ class _CachedCoverImageState extends State<CachedCoverImage> {
   _CoverStatus _status = _CoverStatus.loading;
   late String _loadKey;
   bool _needsLoad = true;
+  int _retry = 0;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _loadKey = widget.url;
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && _status == _CoverStatus.failed) {
+      _retry++;
+      _loadImage();
+    }
   }
 
   @override
@@ -134,13 +152,12 @@ class _CachedCoverImageState extends State<CachedCoverImage> {
 
     // Local file path (e.g. a user-picked custom cover): use it directly,
     // no download or CDN resizing needed.
-    if (CachedCoverImage.isLocalPath(widget.url)) {
-      final f = File(CachedCoverImage.localPathOf(widget.url));
-      _settle(token, await f.exists() ? f : null);
-      return;
-    }
-
     try {
+      if (CachedCoverImage.isLocalPath(widget.url)) {
+        final f = File(CachedCoverImage.localPathOf(widget.url));
+        _settle(token, await f.exists() ? f : null);
+        return;
+      }
       final fetchUrl =
           CachedCoverImage.sizedUrl(widget.url, _targetW, _targetH);
 
@@ -181,8 +198,26 @@ class _CachedCoverImageState extends State<CachedCoverImage> {
   /// Downloads [fetchUrl] into [file] via a `.part` sibling + rename, so a
   /// kill mid-write can never leave a truncated file cached forever.
   static Future<File?> _downloadAndCache(String fetchUrl, File file) async {
+    HttpClientRequest? request;
+    var expired = false;
+    final deadline = Timer(const Duration(seconds: 30), () {
+      expired = true;
+      request?.abort(const HttpException('Cover download timed out'));
+    });
     try {
-      final req = await _client.getUrl(Uri.parse(fetchUrl));
+      final req = await _client.getUrl(Uri.parse(fetchUrl)).then((value) {
+        if (expired) value.abort();
+        return value;
+      })
+          .timeout(const Duration(seconds: 30), onTimeout: () {
+        expired = true;
+        throw TimeoutException('Cover connection timed out');
+      });
+      request = req;
+      if (expired) {
+        req.abort();
+        return null;
+      }
       req.headers.set('Referer', 'https://www.bilibili.com/');
       req.headers.set('User-Agent', kBiliUserAgent);
       final res = await req.close();
@@ -215,6 +250,8 @@ class _CachedCoverImageState extends State<CachedCoverImage> {
       }
     } catch (_) {
       return null;
+    } finally {
+      deadline.cancel();
     }
   }
 
@@ -248,12 +285,16 @@ class _CachedCoverImageState extends State<CachedCoverImage> {
             height: cacheH > 0 ? cacheH : null,
             policy: ResizeImagePolicy.fit,
           ),
-          key: ValueKey(_file!.path),
+          key: ValueKey('${_file!.path}:$_retry'),
           width: widget.width,
           height: widget.height,
           fit: widget.fit,
           gaplessPlayback: true,
-          errorBuilder: (context, error, stackTrace) => _buildFallback(),
+          errorBuilder: (context, error, stackTrace) {
+            // Retry failed file decodes after returning to the foreground too.
+            _status = _CoverStatus.failed;
+            return _buildFallback();
+          },
         );
       case _CoverStatus.failed:
         child = _buildFallback();
