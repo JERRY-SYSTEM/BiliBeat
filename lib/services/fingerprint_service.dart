@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:io';
 import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'bili_http.dart';
@@ -10,7 +9,7 @@ import 'bili_http.dart';
 /// B站搜索 API 强制要求 buvid3 Cookie 和 dm_img 风控参数，
 /// 缺少会导致搜索返回空结果 (-352 / 412)。
 class FingerprintService {
-  static final HttpClient _client = biliHttpClient();
+  static final BiliHttpClient _client = biliHttpClient();
 
   static String _buvid3 = '';
   static String _buvid4 = '';
@@ -30,27 +29,29 @@ class FingerprintService {
     }
 
     try {
-      final req = await _client.getUrl(Uri.parse(_spiUrl));
-      req.headers.set('Referer', 'https://www.bilibili.com');
-      req.headers.set('User-Agent', kBiliUserAgent);
-      final res = await req.close();
-      if (res.statusCode != 200) {
-        await res.drain<void>();
-        throw Exception('fingerprint HTTP ${res.statusCode}');
-      }
-      final body = await res.transform(utf8.decoder).join();
-
-      final json = jsonDecode(body);
-      if (json['code'] == 0 && json['data'] != null) {
-        _buvid3 = json['data']['b_3'] as String? ?? '';
-        _buvid4 = json['data']['b_4'] as String? ?? '';
-        // A code-0 response with an empty b_3 is a failure too: caching it
-        // would make every search re-fetch, and using it produces no cookie.
-        if (_buvid3.isNotEmpty) {
-          _cacheTime = now;
-          return {'buvid3': _buvid3, 'buvid4': _buvid4};
+      final result = await _client.run((client) async {
+        final res = await biliGet(client, Uri.parse(_spiUrl), headers: {
+          'Referer': 'https://www.bilibili.com', 'User-Agent': kBiliUserAgent,
+        });
+        if (res.statusCode != 200) {
+          throw Exception('fingerprint HTTP ${res.statusCode}');
         }
-      }
+        final body = await res.boundedBody.transform(utf8.decoder).join();
+
+        final json = jsonDecode(body);
+        if (json['code'] == 0 && json['data'] != null) {
+          _buvid3 = json['data']['b_3'] as String? ?? '';
+          _buvid4 = json['data']['b_4'] as String? ?? '';
+          // A code-0 response with an empty b_3 is a failure too: caching it
+          // would make every search re-fetch, and using it produces no cookie.
+          if (_buvid3.isNotEmpty) {
+            _cacheTime = now;
+            return {'buvid3': _buvid3, 'buvid4': _buvid4};
+          }
+        }
+        return null;
+      });
+      if (result != null) return result;
     } catch (e) {
       debugPrint('FingerprintService: failed to get buvid: $e');
     }

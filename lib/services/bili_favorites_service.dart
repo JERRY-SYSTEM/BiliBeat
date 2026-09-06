@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 
@@ -11,7 +10,7 @@ import 'bilibili_sdk.dart';
 
 class BiliFavoritesService {
   static const _base = 'https://api.bilibili.com';
-  static final HttpClient _client = biliHttpClient(connectionTimeout: const Duration(seconds: 15));
+  static final BiliHttpClient _client = biliHttpClient(connectionTimeout: const Duration(seconds: 15));
 
   static Future<List<BiliFavoriteCollection>> fetchCollections(BiliSession session) async {
     final mid = session.mid ?? int.tryParse(session.dedeUserId) ?? 0;
@@ -114,15 +113,14 @@ class BiliFavoritesService {
     return Track(id: '${bvid}_p1', bvid: bvid, cid: cid, title: title.isEmpty ? '未知曲目' : title, rawTitle: title, uploader: uploader.isEmpty ? '未知UP主' : uploader, coverUrl: cover, duration: duration);
   }
 
-  static Future<Map<String, dynamic>> _get(String url, String cookies) async {
-    final req = await _client.getUrl(Uri.parse(url));
-    req.headers.set('Referer', 'https://www.bilibili.com');
-    req.headers.set('User-Agent', kBiliUserAgent);
-    req.headers.set('Cookie', cookies);
-    final res = await req.close();
-    final body = await res.transform(utf8.decoder).join();
+  static Future<Map<String, dynamic>> _get(String url, String cookies) => _client.run((client) async {
+    final res = await biliGet(client, Uri.parse(url), headers: {
+      'Referer': 'https://www.bilibili.com', 'User-Agent': kBiliUserAgent,
+      'Cookie': cookies,
+    });
+    final body = await res.boundedBody.transform(utf8.decoder).join();
     return Map<String, dynamic>.from(jsonDecode(body) as Map);
-  }
+  });
 
   static void _check(Map<String, dynamic> json) {
     final code = (json['code'] as num? ?? -1).toInt();

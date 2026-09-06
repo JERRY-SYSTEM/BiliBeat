@@ -1,9 +1,11 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:hugeicons/hugeicons.dart';
 import '../services/audio_download_service.dart';
 import '../services/cache_inventory.dart';
 import '../services/database_service.dart';
+import '../services/runtime_health.dart';
 import '../theme/app_theme.dart';
 import 'cached_cover_image.dart';
 
@@ -18,6 +20,7 @@ class _CacheSettingsPageState extends State<CacheSettingsPage> {
   bool _loading = true;
   bool _busy = false;
   String? _loadError;
+  String _failureDetails = '';
 
   @override void initState() { super.initState(); _reload(); }
   Future<void> _reload() async {
@@ -27,6 +30,8 @@ class _CacheSettingsPageState extends State<CacheSettingsPage> {
       if (mounted) setState(() { _buckets = buckets; });
     } catch (error) {
       debugPrint('Cache inventory failed: $error');
+      await RuntimeHealth.instance.sample('cache-load-error');
+      _failureDetails = '$error\n${RuntimeHealth.instance.report}';
       if (mounted) setState(() => _loadError = '缓存读取失败，请稍后重试');
     } finally {
       if (mounted) setState(() => _loading = false);
@@ -69,7 +74,14 @@ class _CacheSettingsPageState extends State<CacheSettingsPage> {
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _loadError != null
-          ? Center(child: TextButton(onPressed: _reload, child: Text('$_loadError · 重试')))
+          ? Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
+              TextButton(onPressed: _reload, child: Text('$_loadError · 重试')),
+              TextButton(onPressed: () async {
+                await Clipboard.setData(ClipboardData(text: _failureDetails));
+                if (!mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('错误详情已复制')));
+              }, child: const Text('复制错误详情')),
+            ]))
           : Column(
               children: [
                 Expanded(

@@ -28,8 +28,8 @@ class AmbientBackground extends StatefulWidget {
   State<AmbientBackground> createState() => _AmbientBackgroundState();
 }
 
-class _AmbientBackgroundState extends State<AmbientBackground> {
-  static final HttpClient _client = biliHttpClient();
+class _AmbientBackgroundState extends State<AmbientBackground> with WidgetsBindingObserver {
+  static final BiliHttpClient _client = biliHttpClient();
 
   static final Map<String, Color> _colorCache = {};
   static const int _maxCacheSize = 100;
@@ -47,7 +47,19 @@ class _AmbientBackgroundState extends State<AmbientBackground> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _resolve(widget.coverUrl);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _resolve(widget.coverUrl);
   }
 
   @override
@@ -59,6 +71,8 @@ class _AmbientBackgroundState extends State<AmbientBackground> {
   }
 
   Future<void> _resolve(String? url) async {
+    final lifecycle = WidgetsBinding.instance.lifecycleState;
+    if (lifecycle != null && lifecycle != AppLifecycleState.resumed) return;
     // Bump the token before every branch: a fallback/cache apply from an old
     // coverUrl must not be able to win over a newer one still extracting.
     final token = ++_token;
@@ -100,20 +114,19 @@ class _AmbientBackgroundState extends State<AmbientBackground> {
     } else {
       // Ask the CDN for a thumbnail: we only ever decode 24×24, so pulling the
       // full-resolution cover would waste the bytes entirely.
-      final req = await _client
-          .getUrl(Uri.parse(CachedCoverImage.sizedUrl(url, 64, 64)));
-      req.headers.set('Referer', 'https://www.bilibili.com/');
-      req.headers.set('User-Agent', kBiliUserAgent);
-      final res = await req.close();
-      if (res.statusCode != HttpStatus.ok) {
-        await res.drain<void>();
-        throw Exception('HTTP ${res.statusCode}');
-      }
-      final builder = BytesBuilder(copy: false);
-      await for (final chunk in res) {
-        builder.add(chunk);
-      }
-      bytes = builder.takeBytes();
+      bytes = await _client.run((client) async {
+        final res = await biliGet(client, Uri.parse(CachedCoverImage.sizedUrl(url, 64, 64)), headers: {
+          'Referer': 'https://www.bilibili.com/', 'User-Agent': kBiliUserAgent,
+        });
+        if (res.statusCode != HttpStatus.ok) {
+          throw Exception('HTTP ${res.statusCode}');
+        }
+        final builder = BytesBuilder(copy: false);
+        await for (final chunk in res.boundedBody) {
+          builder.add(chunk);
+        }
+        return builder.takeBytes();
+      });
     }
 
     final codec = await ui.instantiateImageCodec(

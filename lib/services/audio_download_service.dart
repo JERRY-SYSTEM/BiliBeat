@@ -46,7 +46,7 @@ class DownloadProgress {
 class AudioDownloadService {
   AudioDownloadService._();
 
-  static final HttpClient _client = biliHttpClient(
+  static final BiliHttpClient _client = biliHttpClient(
     connectionTimeout: const Duration(seconds: 15),
     idleTimeout: const Duration(seconds: 60),
   );
@@ -254,32 +254,93 @@ class AudioDownloadService {
       _emit(DownloadProgress(track.id, 0, null, false, '无法获取音源下载链接'));
       throw Exception('无法获取音源下载链接');
     }
+    final downloadUri = Uri.parse(url);
 
     final tmp = File('$path.part');
     IOSink? sink;
     var lastEmitted = 0;
     try {
-      final req = await _client.getUrl(Uri.parse(url));
-      req.headers.set('Referer', 'https://www.bilibili.com/');
-      req.headers.set('User-Agent', kBiliUserAgent);
-      req.headers.set('Accept', '*/*');
-      req.headers.set('Accept-Encoding', 'identity');
+      return await _client.run((client) async {
 
-      // Resume an interrupted download when a .part file survived: ask for
-      // the remaining range. A server that ignores Range answers 200 with
-      // the whole file, which is detected below and starts from scratch.
-      final existing = await tmp.exists() ? await tmp.length() : 0;
-      if (existing > 0) {
-        req.headers.set('Range', 'bytes=$existing-');
-      }
+        // Resume an interrupted download when a .part file survived: ask for
+        // the remaining range. A server that ignores Range answers 200 with
+        // the whole file, which is detected below and starts from scratch.
+        final existing = await tmp.exists() ? await tmp.length() : 0;
+        final res = await biliGet(client, downloadUri, headers: {
+          'Referer': 'https://www.bilibili.com/', 'User-Agent': kBiliUserAgent,
+          'Accept': '*/*', 'Accept-Encoding': 'identity',
+          if (existing > 0) 'Range': 'bytes=$existing-',
+        });
+        // A .part that already covers the whole file (e.g. a crash between the
+        // rename and the .ready marker) makes the CDN answer 416. The bytes on
+        // disk are complete — finalize them instead of failing the download.
+        if (res.statusCode == HttpStatus.requestedRangeNotSatisfiable &&
+            existing > 0) {
+          final destination = File(path);
+          if (await destination.exists()) {
+            await destination.delete();
+          }
+          await tmp.rename(path);
+          await File(_readyPath(dir, _key(track), quality?.id)).create();
+          await saveTrackMetadata(track);
+          _downloadedMemo['${_key(track)}_${quality?.id ?? 0}'] = true;
+          _emit(DownloadProgress(track.id, existing, existing, true, null));
+          await DatabaseService.saveDownloadedTrack(track);
+          return path;
+        }
+        if (res.statusCode != HttpStatus.ok &&
+            res.statusCode != HttpStatus.partialContent) {
+          throw Exception('CDN HTTP ${res.statusCode}');
+        }
+        // A signed CDN link that has expired answers 200 with an HTML/JSON error
+        // body; writing that to disk would leave a permanently "downloaded"
+        // track that cannot play.
+        final contentType = res.headers.contentType?.mimeType ?? '';
+        if (contentType.startsWith('text/') || contentType.contains('json')) {
+          throw Exception('CDN 返回了非音频内容 ($contentType)');
+        }
 
-      final res = await req.close();
-      // A .part that already covers the whole file (e.g. a crash between the
-      // rename and the .ready marker) makes the CDN answer 416. The bytes on
-      // disk are complete — finalize them instead of failing the download.
-      if (res.statusCode == HttpStatus.requestedRangeNotSatisfiable &&
-          existing > 0) {
-        await res.drain<void>();
+        final int? total;
+        var received = 0;
+        if (res.statusCode == HttpStatus.partialContent) {
+          // 206: the server honored the range — append to what is on disk.
+          received = existing;
+          lastEmitted = existing;
+          total = res.contentLength > 0 ? existing + res.contentLength : null;
+          sink = tmp.openWrite(mode: FileMode.append);
+        } else {
+          // 200 after a Range request means the server ignored it; the body is
+          // the entire file, so whatever the .part holds is unusable.
+          if (existing > 0) {
+            await tmp.delete();
+          }
+          total = res.contentLength > 0 ? res.contentLength : null;
+          sink = tmp.openWrite();
+        }
+
+        await sink!.addStream(res.boundedBody.map((chunk) {
+          received += chunk.length;
+          // Throttle progress events to ~every 64 KiB to avoid stream spam.
+          if (received - lastEmitted >= 65536) {
+            lastEmitted = received;
+            _emit(DownloadProgress(track.id, received, total, false, null));
+          }
+          return chunk;
+        }));
+
+        await sink!.flush();
+        await sink!.close();
+        sink = null;
+
+        // Truncated transfer (dropped connection mid-stream): fail loudly rather
+        // than marking a half file as ready.
+        if (total != null && received < total) {
+          throw Exception('下载不完整 ($received/$total 字节)');
+        }
+        if (received < 1024) {
+          throw Exception('音频文件异常 ($received 字节)');
+        }
+
         final destination = File(path);
         if (await destination.exists()) {
           await destination.delete();
@@ -288,77 +349,11 @@ class AudioDownloadService {
         await File(_readyPath(dir, _key(track), quality?.id)).create();
         await saveTrackMetadata(track);
         _downloadedMemo['${_key(track)}_${quality?.id ?? 0}'] = true;
-        _emit(DownloadProgress(track.id, existing, existing, true, null));
+
+        _emit(DownloadProgress(track.id, received, total, true, null));
         await DatabaseService.saveDownloadedTrack(track);
         return path;
-      }
-      if (res.statusCode != HttpStatus.ok &&
-          res.statusCode != HttpStatus.partialContent) {
-        await res.drain<void>();
-        throw Exception('CDN HTTP ${res.statusCode}');
-      }
-      // A signed CDN link that has expired answers 200 with an HTML/JSON error
-      // body; writing that to disk would leave a permanently "downloaded"
-      // track that cannot play.
-      final contentType = res.headers.contentType?.mimeType ?? '';
-      if (contentType.startsWith('text/') || contentType.contains('json')) {
-        await res.drain<void>();
-        throw Exception('CDN 返回了非音频内容 ($contentType)');
-      }
-
-      final int? total;
-      var received = 0;
-      if (res.statusCode == HttpStatus.partialContent) {
-        // 206: the server honored the range — append to what is on disk.
-        received = existing;
-        lastEmitted = existing;
-        total = res.contentLength > 0 ? existing + res.contentLength : null;
-        sink = tmp.openWrite(mode: FileMode.append);
-      } else {
-        // 200 after a Range request means the server ignored it; the body is
-        // the entire file, so whatever the .part holds is unusable.
-        if (existing > 0) {
-          await tmp.delete();
-        }
-        total = res.contentLength > 0 ? res.contentLength : null;
-        sink = tmp.openWrite();
-      }
-
-      await for (final chunk in res) {
-        sink.add(chunk);
-        received += chunk.length;
-        // Throttle progress events to ~every 64 KiB to avoid stream spam.
-        if (received - lastEmitted >= 65536) {
-          lastEmitted = received;
-          _emit(DownloadProgress(track.id, received, total, false, null));
-        }
-      }
-
-      await sink.flush();
-      await sink.close();
-      sink = null;
-
-      // Truncated transfer (dropped connection mid-stream): fail loudly rather
-      // than marking a half file as ready.
-      if (total != null && received < total) {
-        throw Exception('下载不完整 ($received/$total 字节)');
-      }
-      if (received < 1024) {
-        throw Exception('音频文件异常 ($received 字节)');
-      }
-
-      final destination = File(path);
-      if (await destination.exists()) {
-        await destination.delete();
-      }
-      await tmp.rename(path);
-      await File(_readyPath(dir, _key(track), quality?.id)).create();
-      await saveTrackMetadata(track);
-      _downloadedMemo['${_key(track)}_${quality?.id ?? 0}'] = true;
-
-      _emit(DownloadProgress(track.id, received, total, true, null));
-      await DatabaseService.saveDownloadedTrack(track);
-      return path;
+      }, download: true);
     } catch (e) {
       try {
         await sink?.close();

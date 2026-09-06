@@ -210,6 +210,7 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
   void _schedulePersist({bool immediate = false}) {
     if (immediate) {
       _persistTimer?.cancel();
+      _persistTimer = null;
       unawaited(_persistState());
       return;
     }

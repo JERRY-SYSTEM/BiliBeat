@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -16,8 +15,7 @@ import '../theme/motion.dart';
 ///  * Requests a size-matched thumbnail from Bilibili's image CDN (which
 ///    supports `@{w}w_{h}h` resizing) instead of the full-resolution original,
 ///    cutting download bytes and decode cost dramatically in long lists.
-///  * Uses one shared [HttpClient] so connections are pooled and reused rather
-///    than spawning (and leaking) a new client per image.
+///  * Uses bounded HTTP operations that close their connections even on errors.
 ///  * Never touches the filesystem synchronously during `build` — that used to
 ///    put a blocking `existsSync` on the raster path for every local cover.
 class CachedCoverImage extends StatefulWidget {
@@ -63,7 +61,7 @@ enum _CoverStatus { loading, ready, failed }
 
 class _CachedCoverImageState extends State<CachedCoverImage>
     with WidgetsBindingObserver {
-  static final HttpClient _client =
+  static final BiliHttpClient _client =
       biliHttpClient(connectionTimeout: const Duration(seconds: 15),
           maxConnectionsPerHost: 8);
 
@@ -198,60 +196,40 @@ class _CachedCoverImageState extends State<CachedCoverImage>
   /// Downloads [fetchUrl] into [file] via a `.part` sibling + rename, so a
   /// kill mid-write can never leave a truncated file cached forever.
   static Future<File?> _downloadAndCache(String fetchUrl, File file) async {
-    HttpClientRequest? request;
-    var expired = false;
-    final deadline = Timer(const Duration(seconds: 30), () {
-      expired = true;
-      request?.abort(const HttpException('Cover download timed out'));
-    });
     try {
-      final req = await _client.getUrl(Uri.parse(fetchUrl)).then((value) {
-        if (expired) value.abort();
-        return value;
-      })
-          .timeout(const Duration(seconds: 30), onTimeout: () {
-        expired = true;
-        throw TimeoutException('Cover connection timed out');
-      });
-      request = req;
-      if (expired) {
-        req.abort();
-        return null;
-      }
-      req.headers.set('Referer', 'https://www.bilibili.com/');
-      req.headers.set('User-Agent', kBiliUserAgent);
-      final res = await req.close();
+      return await _client.run((client) async {
+        final res = await biliGet(client, Uri.parse(fetchUrl), headers: {
+          'Referer': 'https://www.bilibili.com/', 'User-Agent': kBiliUserAgent,
+        });
 
-      if (res.statusCode != 200) {
-        await res.drain<void>();
-        return null;
-      }
-
-      final part = File('${file.path}.part');
-      try {
-        final sink = part.openWrite();
-        try {
-          await res.pipe(sink);
-        } finally {
-          await sink.close();
-        }
-        if (await part.length() == 0) {
+        if (res.statusCode != 200) {
           return null;
         }
-        await part.rename(file.path);
-        return file;
-      } finally {
-        // A failed download must not leave a `.part` file in temp forever.
-        if (await part.exists()) {
+
+        final part = File('${file.path}.part');
+        try {
+          final sink = part.openWrite();
           try {
-            await part.delete();
-          } catch (_) {}
+            await res.boundedBody.pipe(sink);
+          } finally {
+            await sink.close();
+          }
+          if (await part.length() == 0) {
+            return null;
+          }
+          await part.rename(file.path);
+          return file;
+        } finally {
+          // A failed download must not leave a `.part` file in temp forever.
+          if (await part.exists()) {
+            try {
+              await part.delete();
+            } catch (_) {}
+          }
         }
-      }
+      });
     } catch (_) {
       return null;
-    } finally {
-      deadline.cancel();
     }
   }
 

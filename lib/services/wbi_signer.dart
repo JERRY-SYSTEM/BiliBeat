@@ -1,11 +1,10 @@
 import 'dart:convert';
-import 'dart:io';
 import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'bili_http.dart';
 
 class WbiSigner {
-  static final HttpClient _client = biliHttpClient();
+  static final BiliHttpClient _client = biliHttpClient();
 
   static final RegExp _stripChars = RegExp(r"[!'()*]");
 
@@ -56,26 +55,28 @@ class WbiSigner {
     }
 
     try {
-      final req = await _client.getUrl(Uri.parse('https://api.bilibili.com/x/web-interface/nav'));
-      req.headers.set('User-Agent',
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36');
-      req.headers.set('Referer', 'https://www.bilibili.com/');
-      final res = await req.close();
-      if (res.statusCode == 200) {
-        final body = await res.transform(utf8.decoder).join();
-        final json = jsonDecode(body);
-        final wbiImg = json['data']?['wbi_img'];
-        if (wbiImg != null) {
-          final imgUrl = wbiImg['img_url'] as String? ?? '';
-          final subUrl = wbiImg['sub_url'] as String? ?? '';
+      final keys = await _client.run((client) async {
+        final res = await biliGet(client, Uri.parse('https://api.bilibili.com/x/web-interface/nav'), headers: {
+          'User-Agent': kBiliUserAgent, 'Referer': 'https://www.bilibili.com/',
+        });
+        if (res.statusCode == 200) {
+          final body = await res.boundedBody.transform(utf8.decoder).join();
+          final json = jsonDecode(body);
+          final wbiImg = json['data']?['wbi_img'];
+          if (wbiImg != null) {
+            final imgUrl = wbiImg['img_url'] as String? ?? '';
+            final subUrl = wbiImg['sub_url'] as String? ?? '';
 
-          _cachedImgKey = imgUrl.split('/').last.split('.').first;
-          _cachedSubKey = subUrl.split('/').last.split('.').first;
-          _cacheTime = DateTime.now();
+            _cachedImgKey = imgUrl.split('/').last.split('.').first;
+            _cachedSubKey = subUrl.split('/').last.split('.').first;
+            _cacheTime = DateTime.now();
 
-          return {'imgKey': _cachedImgKey, 'subKey': _cachedSubKey};
+            return {'imgKey': _cachedImgKey, 'subKey': _cachedSubKey};
+          }
         }
-      }
+        return null;
+      });
+      if (keys != null) return keys;
     } catch (e) {
       debugPrint('Failed to fetch WBI keys: $e');
     }

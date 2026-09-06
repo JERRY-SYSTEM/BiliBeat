@@ -13,6 +13,7 @@ import 'services/database_service.dart';
 import 'services/audio_player_handler.dart';
 import 'services/audio_download_service.dart';
 import 'services/app_settings_service.dart';
+import 'services/runtime_health.dart';
 import 'services/bili_auth_service.dart';
 import 'services/bili_favorites_service.dart';
 import 'theme/app_theme.dart';
@@ -84,6 +85,7 @@ BiliBeatAudioHandler get audioHandlerInstance {
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  RuntimeHealth.instance.start();
   await AppSettingsService.instance.initialize();
   PaintingBinding.instance.imageCache.maximumSizeBytes = 50 * 1024 * 1024;
   PaintingBinding.instance.imageCache.maximumSize = 60;
@@ -181,6 +183,7 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
   /// One instance for the widget's lifetime (see [_PageFraction.dispose]).
   late final _PageFraction _pageFraction = _PageFraction(_pageController, 0);
   final List<StreamSubscription> _subs = [];
+  int _lyricsRequest = 0;
 
   @override
   void initState() {
@@ -218,6 +221,7 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       _audioHandler.refreshMediaItem();
+      unawaited(_refreshLyrics(_currentTrack.value));
     }
     if (state == AppLifecycleState.inactive ||
         state == AppLifecycleState.paused) {
@@ -335,8 +339,42 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
   }
 
   void _initListeners() {
-    _subs.add(_audioHandler.currentTrackStream.listen((track) async {
+    _subs.add(_audioHandler.currentTrackStream.listen((track) {
       _currentTrack.value = track;
+      unawaited(_refreshLyrics(track));
+    }));
+    _subs.add(_audioHandler.playerStateStream.listen((playing) {
+      _isPlaying.value = playing;
+    }));
+
+    _subs.add(_audioHandler.positionStream.listen((pos) {
+      _positionNotifier.value = pos;
+    }));
+
+    _subs.add(_audioHandler.durationStream.listen((dur) {
+      _durationNotifier.value = dur;
+    }));
+
+    // The handler writes history itself when it auto-advances, so the rail has
+    // to follow the store rather than the UI actions that happen to reach it.
+    _subs.add(DatabaseService.historyUpdateStream.listen((_) => _loadHistory()));
+
+    // The handler restores its queue before Flutter builds the widget tree,
+    // so initialize the docked player from the already-restored snapshot too.
+    final restored = _audioHandler.currentTrack;
+    if (restored != null) {
+      _currentTrack.value = restored;
+      _isPlaying.value = _audioHandler.isPlaying;
+      _positionNotifier.value = _audioHandler.position;
+      _durationNotifier.value = Duration(seconds: restored.duration);
+    }
+  }
+
+  Future<void> _refreshLyrics(Track? track) async {
+    final request = ++_lyricsRequest;
+    final lifecycle = WidgetsBinding.instance.lifecycleState;
+    if (lifecycle != null && lifecycle != AppLifecycleState.resumed) return;
+    try {
       if (track != null) {
 
         // Fetch lyrics with stale cache validation.
@@ -348,7 +386,9 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
         final cleanSongTitle =
             LyricsEngine.cleanTitle(track.rawTitle)['songTitle'] ?? '';
         final cached = await DatabaseService.getCachedLyrics(track.id);
-        if (!mounted || _currentTrack.value?.id != track.id) return;
+        if (!mounted || request != _lyricsRequest || _currentTrack.value?.id != track.id) return;
+        final state = WidgetsBinding.instance.lifecycleState;
+        if (state != null && state != AppLifecycleState.resumed) return;
 
         bool isCacheValid = false;
         if (cached != null && cached.lines.isNotEmpty && cached.source != 'none') {
@@ -374,7 +414,7 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
         } else {
           _lyricsNotifier.value = const [];
           final freshLyrics = await LyricsEngine.autoFetchLyrics(track.rawTitle);
-          if (!mounted || _currentTrack.value?.id != track.id) return;
+          if (!mounted || request != _lyricsRequest || _currentTrack.value?.id != track.id) return;
           // A "not found" result carries placeholder lines; showing an empty
           // list instead lets the lyrics view offer its search/paste action.
           _lyricsNotifier.value =
@@ -382,32 +422,8 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
           await DatabaseService.cacheLyrics(track.id, freshLyrics);
         }
       }
-    }));
-
-    _subs.add(_audioHandler.playerStateStream.listen((playing) {
-      _isPlaying.value = playing;
-    }));
-
-    _subs.add(_audioHandler.positionStream.listen((pos) {
-      _positionNotifier.value = pos;
-    }));
-
-    _subs.add(_audioHandler.durationStream.listen((dur) {
-      _durationNotifier.value = dur;
-    }));
-
-    // The handler writes history itself when it auto-advances, so the rail has
-    // to follow the store rather than the UI actions that happen to reach it.
-    _subs.add(DatabaseService.historyUpdateStream.listen((_) => _loadHistory()));
-
-    // The handler restores its queue before Flutter builds the widget tree,
-    // so initialize the docked player from the already-restored snapshot too.
-    final restored = _audioHandler.currentTrack;
-    if (restored != null) {
-      _currentTrack.value = restored;
-      _isPlaying.value = _audioHandler.isPlaying;
-      _positionNotifier.value = _audioHandler.position;
-      _durationNotifier.value = Duration(seconds: restored.duration);
+    } catch (error) {
+      debugPrint('Foreground lyrics refresh failed: $error');
     }
   }
 

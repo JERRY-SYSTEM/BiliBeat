@@ -13,13 +13,15 @@ class BiliAuthPage extends StatefulWidget {
   State<BiliAuthPage> createState() => _BiliAuthPageState();
 }
 
-class _BiliAuthPageState extends State<BiliAuthPage> {
+class _BiliAuthPageState extends State<BiliAuthPage> with WidgetsBindingObserver {
   final controller = BiliAuthController.instance;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     controller.addListener(_changed);
+    controller.resumeQrPolling();
     if (controller.status == BiliQrStatus.idle) {
       unawaited(controller.startQrLogin());
     }
@@ -27,8 +29,19 @@ class _BiliAuthPageState extends State<BiliAuthPage> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     controller.removeListener(_changed);
+    controller.stopQrLogin();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      controller.resumeQrPolling();
+    } else {
+      controller.suspendQrPolling();
+    }
   }
 
   void _changed() {

@@ -22,7 +22,7 @@ class BiliAuthController extends ChangeNotifier {
 
   static const _passport = 'https://passport.bilibili.com';
   static const _sessionFile = 'bilibeat_bili_session.json';
-  final HttpClient _client = biliHttpClient(connectionTimeout: const Duration(seconds: 15));
+  final BiliHttpClient _client = biliHttpClient(connectionTimeout: const Duration(seconds: 15));
   Timer? _pollTimer;
   bool _polling = false;
   BiliSession? session;
@@ -30,6 +30,8 @@ class BiliAuthController extends ChangeNotifier {
   BiliQrStatus status = BiliQrStatus.idle;
   String? message;
   bool _initialized = false;
+  int _qrGeneration = 0;
+  bool _qrPollingSuspended = false;
 
   Future<void> initialize() async {
     if (_initialized) return;
@@ -47,6 +49,7 @@ class BiliAuthController extends ChangeNotifier {
   }
 
   Future<void> startQrLogin() async {
+    final generation = ++_qrGeneration;
     _cancelPolling();
     status = BiliQrStatus.loading;
     qrSession = null;
@@ -54,14 +57,18 @@ class BiliAuthController extends ChangeNotifier {
     notifyListeners();
     try {
       final json = await _get('$_passport/x/passport-login/web/qrcode/generate');
+      if (generation != _qrGeneration) return;
       _check(json);
       final data = Map<String, dynamic>.from(json['data'] as Map);
       qrSession = BiliQrSession(url: data['url'] as String? ?? '', key: data['qrcode_key'] as String? ?? '');
       status = BiliQrStatus.waitingForScan;
       notifyListeners();
-      _pollTimer = Timer.periodic(const Duration(seconds: 2), (_) => _poll());
-      await _poll();
+      if (!_qrPollingSuspended) {
+        _pollTimer = Timer.periodic(const Duration(seconds: 2), (_) => _poll());
+        await _poll();
+      }
     } catch (e) {
+      if (generation != _qrGeneration) return;
       status = BiliQrStatus.failure;
       message = e.toString();
       notifyListeners();
@@ -70,10 +77,11 @@ class BiliAuthController extends ChangeNotifier {
 
   Future<void> _poll() async {
     final qr = qrSession;
-    if (_polling || qr == null) return;
+    if (_polling || qr == null || _qrPollingSuspended) return;
     _polling = true;
     try {
       final json = await _get('$_passport/x/passport-login/web/qrcode/poll?qrcode_key=${Uri.encodeQueryComponent(qr.key)}');
+      if (!identical(qr, qrSession)) return;
       _check(json);
       final data = Map<String, dynamic>.from(json['data'] as Map);
       final code = (data['code'] as num? ?? -1).toInt();
@@ -99,6 +107,7 @@ class BiliAuthController extends ChangeNotifier {
       }
       notifyListeners();
     } catch (e) {
+      if (!identical(qr, qrSession)) return;
       _cancelPolling();
       status = BiliQrStatus.failure;
       message = e.toString();
@@ -135,19 +144,39 @@ class BiliAuthController extends ChangeNotifier {
     _pollTimer = null;
   }
 
-  Future<Map<String, dynamic>> _get(String url, {String? cookies}) async {
-    final req = await _client.getUrl(Uri.parse(url));
-    req.headers.set('Referer', 'https://www.bilibili.com');
-    req.headers.set('User-Agent', kBiliUserAgent);
-    if (cookies != null) req.headers.set('Cookie', cookies);
-    final res = await req.close();
-    final body = await res.transform(utf8.decoder).join();
+  void stopQrLogin() {
+    ++_qrGeneration;
+    _cancelPolling();
+    qrSession = null;
+    if (status != BiliQrStatus.success) status = BiliQrStatus.idle;
+  }
+
+  void suspendQrPolling() {
+    _qrPollingSuspended = true;
+    _cancelPolling();
+  }
+
+  void resumeQrPolling() {
+    _qrPollingSuspended = false;
+    if (qrSession == null || _pollTimer != null ||
+        (status != BiliQrStatus.waitingForScan &&
+         status != BiliQrStatus.waitingForConfirm)) return;
+    _pollTimer = Timer.periodic(const Duration(seconds: 2), (_) => _poll());
+    unawaited(_poll());
+  }
+
+  Future<Map<String, dynamic>> _get(String url, {String? cookies}) => _client.run((client) async {
+    final res = await biliGet(client, Uri.parse(url), headers: {
+      'Referer': 'https://www.bilibili.com', 'User-Agent': kBiliUserAgent,
+      if (cookies != null) 'Cookie': cookies,
+    });
+    final body = await res.boundedBody.transform(utf8.decoder).join();
     final json = Map<String, dynamic>.from(jsonDecode(body) as Map);
     if (url.contains('/qrcode/poll')) {
       json['_setCookie'] = res.headers[HttpHeaders.setCookieHeader] ?? const [];
     }
     return json;
-  }
+  });
 
   void _check(Map<String, dynamic> json) {
     if ((json['code'] as num? ?? -1).toInt() != 0) throw StateError(json['message'] as String? ?? 'B 站请求失败');

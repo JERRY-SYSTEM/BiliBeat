@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:io';
 import 'package:flutter/foundation.dart';
 import '../models/track.dart';
 import '../models/audio_quality.dart';
@@ -13,7 +12,7 @@ class BilibiliSdk {
   /// 音乐 partition. Covers 原创音乐 / 翻唱 / 演奏 / VOCALOID / 音乐现场 / MV /
   /// 音乐综合 — everything a music player has any business showing.
   static const int _musicZoneId = 3;
-  static final HttpClient _httpClient =
+  static final BiliHttpClient _httpClient =
       biliHttpClient(connectionTimeout: const Duration(seconds: 15),
           maxConnectionsPerHost: 10);
 
@@ -21,19 +20,19 @@ class BilibiliSdk {
 
   static Future<String?> _httpGet(String rawUrl, {String? cookies}) async {
     try {
-      final req = await _httpClient.getUrl(Uri.parse(rawUrl));
-      req.headers.set('Referer', 'https://www.bilibili.com');
-      req.headers.set('User-Agent', kBiliUserAgent);
-      if (cookies != null && cookies.isNotEmpty) {
-        req.headers.set('Cookie', cookies);
-      }
-      final res = await req.close();
-      if (res.statusCode == 200) {
-        return await res.transform(utf8.decoder).join();
-      } else {
-        await res.drain<void>();
-        debugPrint('Bilibili HTTP ${res.statusCode}');
-      }
+      return await _httpClient.run((client) async {
+        final res = await biliGet(client, Uri.parse(rawUrl), headers: {
+          'Referer': 'https://www.bilibili.com',
+          'User-Agent': kBiliUserAgent,
+          if (cookies != null && cookies.isNotEmpty) 'Cookie': cookies,
+        });
+        if (res.statusCode == 200) {
+          return await res.boundedBody.transform(utf8.decoder).join();
+        } else {
+          debugPrint('Bilibili HTTP ${res.statusCode}');
+        }
+        return null;
+      });
     } catch (e) {
       debugPrint('Bilibili HTTP fetch error: $e');
     }
