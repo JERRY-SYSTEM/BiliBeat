@@ -12,6 +12,7 @@ import '../models/track.dart';
 import 'audio_download_service.dart';
 import 'database_service.dart';
 import 'player_queue_manager.dart';
+import '../widgets/cached_cover_image.dart';
 
 enum LoopMode { off, all, one }
 
@@ -59,6 +60,8 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
   LoopMode _loopMode = LoopMode.all;
   bool _isShuffle = false;
   bool _isRebuilding = false;
+  Future<void>? _queuePrune;
+  bool _isPruning = false;
   String? _prefetchingId;
   Duration _resumePosition = Duration.zero;
   Timer? _persistTimer;
@@ -116,6 +119,13 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
   Future<void> persistPlaybackState() => _persistState();
   LoopMode get loopMode => _loopMode;
   bool get isShuffle => _isShuffle;
+
+  /// Republish after foregrounding so artwork which failed under resource or
+  /// network pressure gets another chance without restarting audio playback.
+  void refreshMediaItem() {
+    final track = currentTrack;
+    if (track != null) _updateMediaItem(track);
+  }
   bool get canSkipPrevious {
     if (_playlist.length < 2 || _currentIndex < 0) return false;
     return true;
@@ -324,7 +334,7 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
       // a different one: clearing and re-setting the audio source emits index
       // events, and the stale base index turned them into a bogus logical
       // position.
-      if (_isRebuilding) return;
+      if (_isRebuilding || _isPruning) return;
       final logical = _queueBaseIndex + playerIndex;
       // Guard against echoes from rebuilds / no-op changes.
       if (logical == _currentIndex) return;
@@ -364,6 +374,7 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
   /// window, so without this tag check a bogus announce could land on some
   /// unrelated track of the new playlist.
   void _reconcileActiveTrack() {
+    if (_isRebuilding || _isPruning) return;
     final playerIndex = _player.currentIndex;
     if (playerIndex == null || playerIndex < 0) return;
     if (playerIndex >= _queueSource.length) return;
@@ -408,6 +419,7 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
   // ---------------------------------------------------------------------------
 
   Future<void> playTrack(Track track, {List<Track>? newQueue}) async {
+    if (_queuePrune != null) await _queuePrune;
     _userPaused = false;
     if (newQueue != null && newQueue.isNotEmpty) {
       _naturalOrder
@@ -440,6 +452,7 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
 
   @override
   Future<void> play() async {
+    if (_queuePrune != null) await _queuePrune;
     _userPaused = false;
     // Cold restore: we have a logical track but an empty native queue.
     if (_queueSource.length == 0 && currentTrack != null) {
@@ -483,6 +496,7 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
 
   @override
   Future<void> seek(Duration position) async {
+    if (_queuePrune != null) await _queuePrune;
     await _player.seek(position);
     _positionController.add(position);
     _broadcastState();
@@ -491,6 +505,7 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
 
   @override
   Future<void> skipToNext() async {
+    if (_queuePrune != null) await _queuePrune;
     if (_playlist.isEmpty) return;
 
     // An explicit "next" always advances, even in repeat-one — matching every
@@ -515,6 +530,7 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
 
   @override
   Future<void> skipToPrevious() async {
+    if (_queuePrune != null) await _queuePrune;
     if (_playlist.isEmpty) return;
 
     // Standard music UX: restart the current track once we're >3s in.
@@ -540,11 +556,13 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
 
   @override
   Future<void> skipToQueueItem(int index) async {
+    if (_queuePrune != null) await _queuePrune;
     if (index < 0 || index >= _playlist.length) return;
     await _playAtIndex(index);
   }
 
   Future<void> removeQueueItemAt(int index) async {
+    if (_queuePrune != null) await _queuePrune;
     if (index < 0 || index >= _playlist.length) return;
     final removedId = _playlist[index].id;
     final wasCurrent = index == _currentIndex;
@@ -577,6 +595,7 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
       // Removing a non-current item never requires replacing the active
       // AudioPlayer source. The native queue is adjusted in place below.
       final nativeIndex = index - _queueBaseIndex;
+      if (nativeIndex < 0) _queueBaseIndex--;
       if (nativeIndex >= 0 && nativeIndex < _queueSource.length) {
         await _queueSource.removeAt(nativeIndex);
       }
@@ -609,6 +628,7 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
   }
 
   Future<void> reorderQueueItem(int oldIndex, int newIndex) async {
+    if (_queuePrune != null) await _queuePrune;
     if (oldIndex < 0 || oldIndex >= _playlist.length) return;
     final resolved = newIndex.clamp(0, _playlist.length - 1).toInt();
     if (oldIndex == resolved) return;
@@ -650,6 +670,7 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
   }
 
   Future<void> clearQueue() async {
+    if (_queuePrune != null) await _queuePrune;
     ++_startToken;
     _isRebuilding = true;
     try {
@@ -672,6 +693,7 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
   }
 
   Future<void> _rebuildNativeQueueAtCurrent() async {
+    if (_queuePrune != null) await _queuePrune;
     final active = currentTrack;
     if (active == null) return;
     final position = _player.position;
@@ -702,17 +724,17 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
   /// Switch to a logical index and start it, reusing the native queue when the
   /// target is already the prefetched next item (so the transition is gapless).
   Future<void> _playAtIndex(int index) async {
+    if (_queuePrune != null) await _queuePrune;
     if (index < 0 || index >= _playlist.length) return;
     _userPaused = false;
     final playerIndex = index - _queueBaseIndex;
     if (playerIndex >= 0 && playerIndex < _queueSource.length) {
       _currentIndex = index;
-      // Broadcast immediately: the currentIndexStream listener's
-      // `logical == _currentIndex` guard would swallow the echo from the
-      // seek below, so without this the UI never learns the track changed.
+      // Announce after the seek: announcing also prunes old native sources,
+      // which must not change the target index before the seek is submitted.
       _positionController.add(Duration.zero);
-      _onActiveTrackChanged(_playlist[index]);
       await _player.seek(Duration.zero, index: playerIndex);
+      _onActiveTrackChanged(_playlist[index]);
       // Seeking to a child after the previous item completed does not always
       // clear just_audio's completed/playWhenReady state. Explicit navigation
       // must actively start the selected child, otherwise the UI advances
@@ -747,6 +769,7 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
   }
 
   Future<void> setLoopMode(LoopMode mode) async {
+    if (_queuePrune != null) await _queuePrune;
     if (_loopMode == mode) return;
     _loopMode = mode;
     _loopModeController.add(_loopMode);
@@ -767,6 +790,7 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
   }
 
   Future<void> setShuffle(bool on) async {
+    if (_queuePrune != null) await _queuePrune;
     if (_isShuffle == on) return;
     _isShuffle = on;
     _shuffleController.add(_isShuffle);
@@ -793,6 +817,7 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
   /// Inserts a downloaded track immediately after the current track without
   /// interrupting the current playback.
   Future<void> playNext(Track track) async {
+    if (_queuePrune != null) await _queuePrune;
     if (_playlist.isEmpty || _currentIndex < 0) {
       await playTrack(track);
       return;
@@ -885,6 +910,7 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
   /// Drops every queued item after the one the player is currently on, so the
   /// prefetch window can be rebuilt without interrupting playback.
   Future<void> _trimQueueAfterCurrent() async {
+    if (_queuePrune != null) await _queuePrune;
     final playerIndex = _player.currentIndex ?? 0;
     if (_queueSource.length > playerIndex + 1) {
       await _queueSource.removeRange(playerIndex + 1, _queueSource.length);
@@ -895,6 +921,7 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
   /// Download (if needed) the current track and load it as a single-item native
   /// queue, then optionally start playback and prefetch the following track.
   Future<void> _startCurrent({required bool autoplay, Duration? initialPosition}) async {
+    if (_queuePrune != null) await _queuePrune;
     final active = currentTrack;
     if (active == null) return;
 
@@ -980,6 +1007,7 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
   }
 
   Future<void> _recoverPlayback() async {
+    if (_queuePrune != null) await _queuePrune;
     if (_recovering || _userPaused || _playlist.isEmpty || _currentIndex < 0) return;
     _recovering = true;
     try {
@@ -1009,6 +1037,14 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
   /// queue's last child. This keeps the window gapless-ready without ever
   /// streaming bytes through Dart.
   Future<void> _prefetchNext() async {
+    if (_isRebuilding) return;
+    // Release played native sources even at the end of a playlist or when
+    // prefetch is disabled. Keep one predecessor for instant previous-track
+    // navigation; the full logical playlist remains available on disk.
+    final prune = _queuePrune ??= _prunePlayedSources();
+    await prune;
+    if (identical(_queuePrune, prune)) _queuePrune = null;
+    if (_isRebuilding) return;
     if (_loopMode == LoopMode.one || autoAdvanceHeld) return;
     if (_playlist.isEmpty || _currentIndex < 0) return;
 
@@ -1034,6 +1070,7 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
       // guard alone can pass for a *new* window and append a stale track.
       final succIndex = _currentIndex + 1;
       if (!_isRebuilding &&
+          !_isPruning &&
           !autoAdvanceHeld &&
           _loopMode != LoopMode.one &&
           !_isShuffle &&
@@ -1049,10 +1086,38 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
     }
   }
 
+  Future<void> _prunePlayedSources() async {
+    final index = _player.currentIndex;
+    if (index == null || index <= 1 || index >= _queueSource.length) return;
+    final removeCount = index - 1;
+    final generation = _startToken;
+    _isPruning = true;
+    try {
+      await _queueSource.removeRange(0, removeCount);
+    } catch (error) {
+      debugPrint('Pruning played audio sources failed: $error');
+    } finally {
+      // removeRange changes the Dart children before its platform await. Even
+      // a platform error must not leave our offset describing the old list.
+      if (generation == _startToken && _queueSource.children.isNotEmpty) {
+        final first = _queueSource.children.first;
+        if (first is ja.IndexedAudioSource && first.tag is Track) {
+          final base = _playlist.indexWhere((t) => t.id == (first.tag as Track).id);
+          if (base >= 0) _queueBaseIndex = base;
+        }
+      }
+      _isPruning = false;
+    }
+    _reconcileActiveTrack();
+    if (_player.playing && _player.processingState == ja.ProcessingState.completed) {
+      _handleQueueCompleted();
+    }
+  }
+
   /// The native queue ran out. Advance the logical playlist (the prefetch of
   /// the following track may simply not have finished in time).
   void _handleQueueCompleted() {
-    if (_isRebuilding || _userPaused || _playlist.isEmpty) return;
+    if (_isRebuilding || _isPruning || _userPaused || _playlist.isEmpty) return;
 
     // The user is on the lyrics / info surface: end here rather than pulling
     // the ground out from under them by loading another track.
@@ -1132,7 +1197,13 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
       title: track.title,
       artist: track.uploader,
       duration: Duration(seconds: track.duration > 0 ? track.duration : 180),
-      artUri: track.coverUrl.isEmpty ? null : Uri.tryParse(track.coverUrl),
+      artUri: track.coverUrl.isEmpty ? null :
+          (CachedCoverImage.isLocalPath(track.coverUrl)
+              ? Uri.file(CachedCoverImage.localPathOf(track.coverUrl))
+              : Uri.tryParse(CachedCoverImage.sizedUrl(track.coverUrl, 512, 512))),
+      artHeaders: const {
+        'Referer': 'https://www.bilibili.com/',
+      },
     );
     mediaItem.add(item);
   }

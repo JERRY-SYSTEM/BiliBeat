@@ -17,11 +17,20 @@ class _CacheSettingsPageState extends State<CacheSettingsPage> {
   final Set<String> _selected = <String>{};
   bool _loading = true;
   bool _busy = false;
+  String? _loadError;
 
   @override void initState() { super.initState(); _reload(); }
   Future<void> _reload() async {
-    final buckets = await CacheInventory.load(await DatabaseService.getDownloadedTracks());
-    if (mounted) setState(() { _buckets = buckets; _loading = false; });
+    if (mounted) setState(() { _loading = true; _loadError = null; });
+    try {
+      final buckets = await CacheInventory.load(await DatabaseService.getDownloadedTracks());
+      if (mounted) setState(() { _buckets = buckets; });
+    } catch (error) {
+      debugPrint('Cache inventory failed: $error');
+      if (mounted) setState(() => _loadError = '缓存读取失败，请稍后重试');
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
   }
   int get _total => _buckets.fold(0, (sum, bucket) => sum + bucket.bytes);
   int get _selectedBytes => _buckets.where((b) => _selected.contains(b.track?.id ?? '__other__')).fold(0, (sum, b) => sum + b.bytes);
@@ -59,6 +68,8 @@ class _CacheSettingsPageState extends State<CacheSettingsPage> {
       appBar: AppBar(title: const Text('缓存管理'), actions: [IconButton(onPressed: _loading ? null : _toggleAll, tooltip: '全选/取消全选', icon: const HugeIcon(icon: HugeIcons.strokeRoundedMore03))]),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
+          : _loadError != null
+          ? Center(child: TextButton(onPressed: _reload, child: Text('$_loadError · 重试')))
           : Column(
               children: [
                 Expanded(
