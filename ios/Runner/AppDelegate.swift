@@ -36,6 +36,10 @@ import Darwin
       var files = 0
       var sockets = 0
       var other = 0
+      var filePaths: [String: Int] = [:]
+      var unresolvedFiles = 0
+      let home = NSHomeDirectory()
+      var pathBuffer = [CChar](repeating: 0, count: Int(MAXPATHLEN))
       for descriptor in 0..<scanLimit {
         let fd = Int32(descriptor)
         if fcntl(fd, F_GETFD) == -1 { continue }
@@ -43,7 +47,23 @@ import Darwin
         if fstat(fd, &info) == 0 {
           switch info.st_mode & mode_t(S_IFMT) {
           case mode_t(S_IFSOCK): sockets += 1
-          case mode_t(S_IFREG), mode_t(S_IFDIR): files += 1
+          case mode_t(S_IFREG), mode_t(S_IFDIR):
+            files += 1
+            // F_GETPATH identifies an already-open descriptor without opening
+            // another file. Counts alone cannot locate the leaking owner.
+            let pathResult = pathBuffer.withUnsafeMutableBufferPointer {
+              fcntl(fd, F_GETPATH, $0.baseAddress!)
+            }
+            if pathResult == 0 {
+              let path = pathBuffer.withUnsafeBufferPointer {
+                String(cString: $0.baseAddress!)
+              }
+              let label = path.hasPrefix(home + "/")
+                ? "$APP" + String(path.dropFirst(home.count)) : path
+              filePaths[label, default: 0] += 1
+            } else {
+              unresolvedFiles += 1
+            }
           default: other += 1
           }
         } else {
@@ -57,6 +77,10 @@ import Darwin
       result([
         "openFDs": files + sockets + other,
         "files": files, "sockets": sockets, "other": other,
+        "topFiles": filePaths.sorted {
+          $0.value == $1.value ? $0.key < $1.key : $0.value > $1.value
+        }.prefix(12).map { ["path": $0.key, "count": $0.value] as [String: Any] },
+        "unresolvedFiles": unresolvedFiles,
         "softLimit": NSNumber(value: limits.rlim_cur), "scanned": scanLimit,
         "bundleOpenErrno": probeError,
         "protectedDataAvailable": UIApplication.shared.isProtectedDataAvailable,

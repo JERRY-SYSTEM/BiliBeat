@@ -65,7 +65,9 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
   String? _prefetchingId;
   Duration _resumePosition = Duration.zero;
   Timer? _persistTimer;
-  Future<void> _persistOperation = Future<void>.value();
+  Future<void>? _persistOperation;
+  bool _persistRequested = false;
+  RandomAccessFile? _stateFile;
   bool _userPaused = false;
   bool _restoredWasPlaying = false;
   bool _recovering = false;
@@ -215,33 +217,56 @@ class BiliBeatAudioHandler extends BaseAudioHandler with SeekHandler {
       return;
     }
     if (_persistTimer != null) return;
-    _persistTimer = Timer(const Duration(seconds: 5), () {
+    _persistTimer = Timer(const Duration(seconds: 30), () {
       _persistTimer = null;
       unawaited(_persistState());
     });
   }
 
-  Future<void> _persistState() async {
-    // Multiple state changes can request an immediate save in quick
-    // succession (for example when starting a playlist). Serialize writes so
-    // an older snapshot can never finish after the newer one.
-    _persistOperation = _persistOperation.then((_) async {
-      try {
-        final map = {
-          'queue': _playlist.map((t) => t.toMap()).toList(),
-          'naturalOrder': _naturalOrder.map((t) => t.toMap()).toList(),
-          'currentIndex': _currentIndex,
-          'loopMode': _loopMode.name,
-          'shuffle': _isShuffle,
-          'positionMs': _player.position.inMilliseconds,
-          'wasPlaying': _player.playing && !_userPaused,
-        };
-        await File(await _playbackStatePath()).writeAsString(jsonEncode(map));
-      } catch (e) {
-        debugPrint('Playback queue persist failed: $e');
+  Future<void> _persistState() {
+    // Keep one writer and at most one pending snapshot. Chaining a Future for
+    // every position tick retains a growing backlog when background I/O stalls.
+    _persistRequested = true;
+    return _persistOperation ??= _drainPersistRequests();
+  }
+
+  Future<void> _drainPersistRequests() async {
+    try {
+      while (_persistRequested) {
+        _persistRequested = false;
+        try {
+          final map = {
+            'queue': _playlist.map((t) => t.toMap()).toList(),
+            'naturalOrder': _naturalOrder.map((t) => t.toMap()).toList(),
+            'currentIndex': _currentIndex,
+            'loopMode': _loopMode.name,
+            'shuffle': _isShuffle,
+            'positionMs': _player.position.inMilliseconds,
+            'wasPlaying': _player.playing && !_userPaused,
+          };
+          final bytes = utf8.encode(jsonEncode(map));
+          // The handler lives for the process lifetime. Reuse one explicitly
+          // owned descriptor instead of repeatedly opening a file via IOSink.
+          // Only this serialized writer may change its offset or length.
+          final file = _stateFile ??= await File(await _playbackStatePath())
+              .open(mode: FileMode.write);
+          await file.setPosition(0);
+          await file.writeFrom(bytes);
+          await file.truncate(bytes.length);
+          await file.flush();
+        } catch (e) {
+          final file = _stateFile;
+          _stateFile = null;
+          try {
+            await file?.close();
+          } catch (_) {}
+          debugPrint('Playback queue persist failed: $e');
+        }
       }
-    });
-    return _persistOperation;
+    } finally {
+      // Clear ownership synchronously with the final pending-work check.
+      _persistOperation = null;
+    }
   }
 
   void _emitQueue() {
