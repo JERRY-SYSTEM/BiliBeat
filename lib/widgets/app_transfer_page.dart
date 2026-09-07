@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:hugeicons/hugeicons.dart';
 
 import '../services/app_transfer_service.dart';
 import '../theme/app_theme.dart';
@@ -16,7 +17,10 @@ class AppTransferPage extends StatefulWidget {
 
 class _AppTransferPageState extends State<AppTransferPage> {
   final AppTransferService _service = const AppTransferService();
-  bool _busy = false;
+  bool _exporting = false;
+  bool _importing = false;
+
+  bool get _busy => _exporting || _importing;
 
   @override
   Widget build(BuildContext context) => Scaffold(
@@ -49,10 +53,10 @@ class _AppTransferPageState extends State<AppTransferPage> {
               child: Column(
                 children: [
                   ListTile(
-                    leading: const Icon(Icons.file_upload_outlined),
+                    leading: const HugeIcon(icon: HugeIcons.strokeRoundedDatabaseExport),
                     title: const Text('导出数据'),
                     subtitle: const Text('备份登录信息、收藏、歌单与本地自定义'),
-                    trailing: _busy
+                    trailing: _exporting
                         ? const SizedBox(
                             width: 20,
                             height: 20,
@@ -63,10 +67,16 @@ class _AppTransferPageState extends State<AppTransferPage> {
                   ),
                   const Divider(height: 1),
                   ListTile(
-                    leading: const Icon(Icons.file_download_outlined),
+                    leading: const HugeIcon(icon: HugeIcons.strokeRoundedDatabaseImport),
                     title: const Text('导入数据'),
                     subtitle: const Text('预览备份内容并选择要恢复的项目'),
-                    trailing: const Icon(Icons.chevron_right_rounded),
+                    trailing: _importing
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.chevron_right_rounded),
                     onTap: _busy ? null : _importData,
                   ),
                 ],
@@ -102,7 +112,7 @@ class _AppTransferPageState extends State<AppTransferPage> {
       ),
     );
     if (confirmed != true || !mounted) return;
-    setState(() => _busy = true);
+    setState(() => _exporting = true);
     try {
       final json = await _service.buildExportJson();
       final bytes = Uint8List.fromList(utf8.encode(json));
@@ -119,12 +129,12 @@ class _AppTransferPageState extends State<AppTransferPage> {
     } catch (error) {
       if (mounted) _showMessage('导出失败：$error');
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) setState(() => _exporting = false);
     }
   }
 
   Future<void> _importData() async {
-    setState(() => _busy = true);
+    setState(() => _importing = true);
     try {
       final result = await FilePicker.pickFiles(
         dialogTitle: '选择 BiliBeat 备份',
@@ -179,7 +189,7 @@ class _AppTransferPageState extends State<AppTransferPage> {
     } catch (error) {
       if (mounted) _showMessage('导入失败：$error');
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) setState(() => _importing = false);
     }
   }
 
