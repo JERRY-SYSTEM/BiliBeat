@@ -87,6 +87,32 @@ void main() {
     );
   });
 
+  test('accepts an unresolved CID when the part id is available', () {
+    final backup = _validBackup();
+    final playlists = backup['playlists'] as List;
+    final track = (playlists.first['tracks'] as List).first as Map;
+    track['cid'] = 0;
+    expect(service.previewImport(_bytes(backup)).favoriteTrackCount, 1);
+  });
+
+  test('rejects duplicate tracks instead of importing duplicate entries', () {
+    final backup = _validBackup();
+    final playlists = backup['playlists'] as List;
+    final tracks = playlists.first['tracks'] as List;
+    tracks.add(Map<String, dynamic>.from(tracks.first as Map));
+    expect(() => service.previewImport(_bytes(backup)),
+        throwsA(isA<AppTransferException>()));
+  });
+
+  test('rejects a part id belonging to a different video', () {
+    final backup = _validBackup();
+    final playlists = backup['playlists'] as List;
+    final track = (playlists.first['tracks'] as List).first as Map;
+    track['id'] = 'BVother_p1';
+    expect(() => service.previewImport(_bytes(backup)),
+        throwsA(isA<AppTransferException>()));
+  });
+
   test('rejects non-manual lyrics in a backup', () {
     final backup = _validBackup();
     final lyrics = backup['manualLyrics'] as Map<String, dynamic>;

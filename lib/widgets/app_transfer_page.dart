@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
@@ -112,6 +111,7 @@ class _AppTransferPageState extends State<AppTransferPage> {
         fileName: _exportFileName(),
         type: FileType.custom,
         allowedExtensions: const ['json'],
+        mimeType: 'application/json',
         bytes: bytes,
       );
       if (!mounted || path == null) return;
@@ -130,17 +130,11 @@ class _AppTransferPageState extends State<AppTransferPage> {
         dialogTitle: '选择 BiliBeat 备份',
         type: FileType.custom,
         allowedExtensions: const ['json'],
-        withData: true,
+        allowMultiple: false,
       );
       if (result.isEmpty) return;
       final file = result.first;
-      Uint8List? bytes = file.bytes;
-      if (bytes == null && file.path != null) {
-        bytes = await File(file.path!).readAsBytes();
-      }
-      if (bytes == null) {
-        throw const AppTransferException('无法读取所选备份文件');
-      }
+      final bytes = await file.readAsBytes();
       final preview = _service.previewImport(bytes);
       if (!mounted) return;
       final selection = await showDialog<AppImportSelection>(
@@ -169,7 +163,7 @@ class _AppTransferPageState extends State<AppTransferPage> {
             ],
           ),
         );
-        if (replaceSession != true) return;
+        if (replaceSession != true || !mounted) return;
       }
       final importResult = await _service.importBytes(
         bytes: bytes,

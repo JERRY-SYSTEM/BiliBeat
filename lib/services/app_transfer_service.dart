@@ -161,6 +161,17 @@ class AppTransferService {
       );
     }
 
+    // Bound concurrent network requests while preserving backup order.
+    Future<List<Track?>> restoreTracks(List<_BackupTrack> tracks) async {
+      final restored = <Track?>[];
+      for (var offset = 0; offset < tracks.length; offset += 4) {
+        restored.addAll(await Future.wait(
+          tracks.skip(offset).take(4).map(hydrate),
+        ));
+      }
+      return restored;
+    }
+
     for (final backupPlaylist in bundle.playlists) {
       final isFavorites = backupPlaylist.id == Playlist.favoritesId;
       if (isFavorites && !selection.importFavorites) continue;
@@ -218,9 +229,7 @@ class AppTransferService {
                   );
           }).toList();
         } else {
-          final restored = await Future.wait(
-            backupPlaylist.tracks.map(hydrate),
-          );
+          final restored = await restoreTracks(backupPlaylist.tracks);
           importedTracks = restored.whereType<Track>().toList();
           skippedTrackCount += restored.where((track) => track == null).length;
         }
@@ -243,9 +252,7 @@ class AppTransferService {
           ),
         );
       } else {
-        final restored = await Future.wait(
-          backupPlaylist.tracks.map(hydrate),
-        );
+        final restored = await restoreTracks(backupPlaylist.tracks);
         importedTracks = restored.whereType<Track>().toList();
         skippedTrackCount += restored.where((track) => track == null).length;
         final existingIndex = current.indexWhere(
@@ -335,7 +342,7 @@ class AppTransferService {
       final candidates = await BilibiliSdk.fetchVideoInfo(reference.bvid);
       Track? details;
       for (final candidate in candidates) {
-        if (candidate.id == reference.id || candidate.cid == reference.cid) {
+        if (candidate.id == reference.id) {
           details = candidate;
           break;
         }
@@ -480,18 +487,23 @@ class _BackupPlaylist {
         (isOnline && (remoteId is! String || remoteId.trim().isEmpty))) {
       throw const AppTransferException('备份中的歌单数据无效');
     }
+    if (id == Playlist.favoritesId && isOnline) {
+      throw const AppTransferException('收藏不能是在线歌单');
+    }
+    final tracks = rawTracks
+        .map((item) => _BackupTrack.fromJson(
+              Map<String, dynamic>.from(item as Map),
+            ))
+        .toList();
+    if (tracks.map((track) => track.id).toSet().length != tracks.length) {
+      throw const AppTransferException('备份歌单中存在重复的歌曲 ID');
+    }
     return _BackupPlaylist(
       id: id,
       name: name,
       isOnline: isOnline,
       remoteId: remoteId as String?,
-      tracks: rawTracks
-          .map(
-            (item) => _BackupTrack.fromJson(
-              Map<String, dynamic>.from(item as Map),
-            ),
-          )
-          .toList(),
+      tracks: tracks,
     );
   }
 
@@ -521,11 +533,14 @@ class _BackupTrack {
         id.isEmpty ||
         bvid is! String ||
         bvid.isEmpty ||
-        cid is! num ||
-        cid.toInt() <= 0 ||
+        cid is! int ||
+        cid < 0 ||
         title is! String ||
         uploader is! String) {
       throw const AppTransferException('备份中的歌曲标识无效');
+    }
+    if (!RegExp('^${RegExp.escape(bvid)}_p[1-9][0-9]*\$').hasMatch(id)) {
+      throw const AppTransferException('备份中的歌曲分 P 标识无效');
     }
     return _BackupTrack(
       id: id,

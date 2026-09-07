@@ -377,7 +377,6 @@ class DatabaseService {
       ..clear()
       ..addAll(replacement);
     _lyricsCache.addAll(manualLyrics);
-    await _persistPlaylists();
     await _persistLyrics();
     var downloadedChanged = false;
     for (var index = 0; index < _downloadedTracks.length; index++) {
@@ -406,6 +405,8 @@ class DatabaseService {
         _historyUpdateController.add(null);
       }
     }
+    // Publish the library event after every affected in-memory store is ready.
+    await _persistPlaylists();
   }
 
   static Future<Playlist> getFavoritesPlaylist() async {
